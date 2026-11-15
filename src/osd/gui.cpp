@@ -17,6 +17,7 @@
 #include "osd/gui.h"
 #include "core/log.h"
 #include "core/net.h"
+#include "osd/folder_picker.h"
 #include "osd/i18n.h"
 #include "osd/input.h"
 #include "osd/scraper.h"
@@ -32,6 +33,10 @@
 #include <stb_image.h>
 
 #include <SDL3/SDL.h>
+
+#if defined(__APPLE__)
+#  include <TargetConditionals.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -324,6 +329,12 @@ bool Gui::init(SDL_Window* window, const std::string& language)
     style.PopupBorderSize  = 1.0f;
     style.FramePadding     = ImVec2(8.0f, 4.0f);
     style.ItemSpacing      = ImVec2(8.0f, 6.0f);
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    // A finger is the pointer: fatter hit areas, and the overlay drags to scroll.
+    m_touch_ui                 = true;
+    style.TouchExtraPadding    = ImVec2(6.0f, 6.0f);
+    style.ScrollbarSize        = 6.0f;
+#endif
     m_base_style = style;
 
     // The platform backend only; each render backend initialises its own ImGui
@@ -332,6 +343,14 @@ bool Gui::init(SDL_Window* window, const std::string& language)
         SM2_ERROR("gui: ImGui_ImplSDL3_InitForOther failed");
         ImGui::DestroyContext();
         return false;
+    }
+
+    if (m_touch_ui) {
+        // Never raise the on-screen keyboard: nothing in the overlay is typed
+        // on a touch screen, and the keyboard would cover half of a phone.
+        ui::Kit::set_touch_only(true);
+        ImGui::GetPlatformIO().Platform_SetImeDataFn = [](ImGuiContext*, ImGuiViewport*, ImGuiPlatformImeData*) {};
+        SDL_StopTextInput(window);
     }
 
     i18n::init();
@@ -393,6 +412,77 @@ void Gui::new_frame()
         }
     }
     ImGui::NewFrame();
+    if (m_touch_ui) {
+        apply_safe_area();
+        update_touch_scroll();
+    }
+}
+
+void Gui::apply_safe_area()
+{
+    // Keep the overlay clear of the notch, the rounded corners and the home
+    // indicator: everything places itself in the main viewport's work area.
+    SDL_Rect safe{};
+    if (m_window == nullptr || !SDL_GetWindowSafeArea(m_window, &safe) || safe.w <= 0 || safe.h <= 0) {
+        return;
+    }
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    vp->WorkPos  = ImVec2(vp->Pos.x + static_cast<float>(safe.x), vp->Pos.y + static_cast<float>(safe.y));
+    vp->WorkSize = ImVec2(static_cast<float>(safe.w), static_cast<float>(safe.h));
+}
+
+void Gui::update_touch_scroll()
+{
+    // ImGui scrolls only with a wheel. Here a mostly vertical drag scrolls the
+    // window under the finger and cancels the press it started on, and the
+    // scroll carries on briefly after the finger lifts.
+    ImGuiContext&  g  = *GImGui;
+    const ImGuiIO& io = g.IO;
+    TouchScroll&   t  = m_touch_scroll;
+    const float    dt = io.DeltaTime > 0.0f ? io.DeltaTime : 1.0f / 60.0f;
+
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        t.target    = g.HoveredWindow;
+        t.scrolling = false;
+        t.fling     = nullptr;
+        t.velocity  = 0.0f;
+    }
+    if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && t.target != nullptr) {
+        const ImVec2 drag      = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 0.0f);
+        const float  threshold = 10.0f * (m_ui_scale > 0.0f ? m_ui_scale : 1.0f);
+        if (!t.scrolling && std::fabs(drag.y) > threshold && std::fabs(drag.y) > std::fabs(drag.x)) {
+            // The nearest window up from the finger that has somewhere to go.
+            ImGuiWindow* w = t.target;
+            while (w != nullptr && w->ScrollMax.y <= 0.0f && (w->Flags & ImGuiWindowFlags_ChildWindow) != 0) {
+                w = w->ParentWindow;
+            }
+            if (w != nullptr && w->ScrollMax.y > 0.0f) {
+                t.target    = w;
+                t.scrolling = true;
+            } else {
+                t.target = nullptr;  // nothing scrolls here: leave the drag to the widget
+            }
+        }
+        if (t.scrolling) {
+            ImGui::ClearActiveID();  // the button the drag began on does not fire
+            ImGui::SetScrollY(t.target, std::clamp(t.target->Scroll.y - io.MouseDelta.y, 0.0f, t.target->ScrollMax.y));
+            const float v = -io.MouseDelta.y / dt;
+            t.velocity    = t.velocity * 0.4f + v * 0.6f;
+        }
+    }
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+        t.fling     = t.scrolling ? t.target : nullptr;
+        t.target    = nullptr;
+        t.scrolling = false;
+    }
+    if (t.fling != nullptr && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        if (std::fabs(t.velocity) < 30.0f) {
+            t.fling = nullptr;
+        } else {
+            ImGui::SetScrollY(t.fling, std::clamp(t.fling->Scroll.y + t.velocity * dt, 0.0f, t.fling->ScrollMax.y));
+            t.velocity *= std::exp(-4.0f * dt);
+        }
+    }
 }
 
 void Gui::apply_scale()
@@ -405,7 +495,10 @@ void Gui::apply_scale()
     const float    sy = io.DisplaySize.y > 0.0f ? io.DisplaySize.y / 768.0f : 1.0f;
     const float    fb = io.DisplayFramebufferScale.y > 0.0f ? io.DisplayFramebufferScale.y : 1.0f;
     float          scale = std::min(sx, sy);
-    scale                = std::clamp(scale, std::clamp(1.0f / fb, 0.5f, 1.0f), 4.0f);
+    // A finger needs bigger targets than a pointer: on a phone's short side the
+    // page scrolls rather than shrinking past readable.
+    const float    floor = m_touch_ui ? 0.9f : std::clamp(1.0f / fb, 0.5f, 1.0f);
+    scale                = std::clamp(scale, floor, 4.0f);
 
     // Rescale from a base-style snapshot, since ScaleAllSizes is cumulative.
     if (scale != m_ui_scale) {
@@ -422,6 +515,22 @@ bool Gui::draw(Config& config, const std::vector<std::string>& gpu_names,
 {
     apply_theme(config);
     apply_scale();
+    // A folder chosen in the system picker since the last frame.
+    if (m_native_pick.has_value()) {
+        using T = DirPickerTarget;
+        std::string& path = m_native_pick->path;
+        switch (m_native_pick->target) {
+            case T::Model1RomDir:  config.model1_rom_dir = path; break;
+            case T::Model2RomDir:  config.model2_rom_dir = path; break;
+            case T::Model3RomDir:  config.model3_rom_dir = path; break;
+            case T::NvramDir:      config.nvram_dir      = path; break;
+            case T::ScreenshotDir: config.screenshot_dir = path; break;
+            case T::BezelDir:      config.bezel_dir      = path; break;
+            case T::CrosshairDir:  config.crosshair_dir  = path; break;
+            case T::None:          break;
+        }
+        m_native_pick.reset();
+    }
     if (config.language != m_language) {
         m_language         = config.language;
         m_language_pending = true;
@@ -618,9 +727,11 @@ void Gui::draw_menu(Config& config, const std::vector<std::string>& gpu_names, I
 
     // Behind the frame: the game dimmed, or the backdrop alone.
     {
+        // The whole display, not only the work area: on iOS the safe area
+        // leaves strips of the game showing at the sides otherwise.
         ImDrawList* bg = ImGui::GetBackgroundDrawList();
-        const ImVec2 a = vp->WorkPos;
-        const ImVec2 b(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y);
+        const ImVec2 a = vp->Pos;
+        const ImVec2 b(vp->Pos.x + vp->Size.x, vp->Pos.y + vp->Size.y);
         const bool   game_behind = !m_current_game.empty();
         bg->AddRectFilled(a, b, game_behind ? ui::with_alpha(p.backdrop, p.light ? 0.80f : 0.74f) : p.backdrop);
     }
@@ -779,24 +890,51 @@ void Gui::draw_menu(Config& config, const std::vector<std::string>& gpu_names, I
 
     // -- foot ----------------------------------------------------------------
     list->AddLine(ImVec2(a.x, foot_top), ImVec2(b.x, foot_top), p.line, kit.stroke());
+    // Touch: buttons stand in for Esc (back to the game) and the Exit key
+    // (back to the game list), at the foot's right.
+    float touch_w = 0.0f;
+    if (m_touch_ui) {
+        const bool  playing = !m_current_game.empty();
+        const char* resume  = playing ? tr("Resume") : tr("Close");
+        const char* games   = tr("Game list");
+        const float gap     = kit.px(8.0f);
+        const ImVec2 rs     = kit.button_size(resume, ui::Kit::Icon::None);
+        const ImVec2 gs     = kit.button_size(games, ui::Kit::Icon::None);
+        const float  by     = foot_top + (foot_h - rs.y) * 0.5f;
+        float        x      = b.x - pad - rs.x;
+        if (kit.button_at(resume, ImVec2(x, by), ui::Kit::Tone::Primary)) {
+            m_visible = false;
+        }
+        touch_w = rs.x;
+        if (playing) {
+            x -= gap + gs.x;
+            if (kit.button_at(games, ImVec2(x, by))) {
+                m_exit_requested = true;
+                m_visible        = false;
+            }
+            touch_w += gap + gs.x;
+        }
+        touch_w += gap;
+    }
     {
-        std::string keys = trf("%s: back", tr("Esc"));
+        std::string keys = m_touch_ui ? std::string() : trf("%s: back", tr("Esc"));
         if (ImGui::GetIO().BackendFlags & ImGuiBackendFlags_HasGamepad) {
-            keys += "   ";
+            if (!keys.empty()) keys += "   ";
             keys += tr("LB/RB: pages");
         }
         if (m_saved_flash > 0.0f) {
             keys = std::string(tr("Saved")) + "   " + keys;
         }
-        const float keys_w = ImGui::CalcTextSize(keys.c_str()).x;
+        const float keys_w = ImGui::CalcTextSize(keys.c_str()).x + touch_w;
+        const float keys_x = b.x - pad - keys_w;
         const float ty     = foot_top + (foot_h - ImGui::GetFontSize()) * 0.5f;
         if (m_saved_flash > 0.0f) {
             const float alpha = std::min(1.0f, m_saved_flash / 0.5f);
-            list->AddText(ImVec2(b.x - pad - keys_w, ty), ui::with_alpha(p.good, alpha), tr("Saved"));
+            list->AddText(ImVec2(keys_x, ty), ui::with_alpha(p.good, alpha), tr("Saved"));
             const float saved_w = ImGui::CalcTextSize(tr("Saved")).x;
-            list->AddText(ImVec2(b.x - pad - keys_w + saved_w, ty), p.faint, keys.c_str() + std::strlen(tr("Saved")));
+            list->AddText(ImVec2(keys_x + saved_w, ty), p.faint, keys.c_str() + std::strlen(tr("Saved")));
         } else {
-            list->AddText(ImVec2(b.x - pad - keys_w, ty), p.faint, keys.c_str());
+            list->AddText(ImVec2(keys_x, ty), p.faint, keys.c_str());
         }
         // The help at the left: the row's tip, else the game and its speed.
         std::string help = kit.focused_tip();
@@ -859,7 +997,8 @@ void Gui::page_display(ui::Kit& kit, Config& config, const std::vector<std::stri
             config.graphics_backend = m_available_renderers[static_cast<size_t>(current)];
         }
     }
-    if (!gpu_names.empty()) {
+    // A phone or tablet has the one GPU: nothing to choose.
+    if (!gpu_names.empty() && !(m_touch_ui && gpu_names.size() == 1)) {
         std::vector<std::string> labels = {tr("Automatic (best)")};
         int                      current = 0;
         for (size_t i = 0; i < gpu_names.size(); ++i) {
@@ -873,6 +1012,7 @@ void Gui::page_display(ui::Kit& kit, Config& config, const std::vector<std::stri
     }
     kit.tip(tr("Waits for the display before showing a frame. Stops tearing; adds up to a frame of delay."));
     kit.toggle(tr("Vsync"), tr("Wait for vertical blank before presenting."), config.vsync);
+    if (!m_touch_ui) {  // an iOS app is always full screen
     kit.toggle(tr("Fullscreen"), nullptr, config.fullscreen);
     {
         int w = static_cast<int>(config.window_width);
@@ -883,6 +1023,7 @@ void Gui::page_display(ui::Kit& kit, Config& config, const std::vector<std::stri
         if (kit.number(tr("Window height"), nullptr, h, 384, 4320, 16, {.disabled = config.fullscreen})) {
             config.window_height = static_cast<u32>(h);
         }
+    }
     }
     kit.end_group();
 
@@ -1345,6 +1486,53 @@ void Gui::page_link(ui::Kit& kit, Config& config)
 // Paths
 // ---------------------------------------------------------------------------
 
+namespace {
+
+/// The Config key of a folder setting, which the iOS picker remembers it by.
+const char* dir_picker_key(Gui::DirPickerTarget target)
+{
+    using T = Gui::DirPickerTarget;
+    switch (target) {
+        case T::Model1RomDir:  return "model1_rom_dir";
+        case T::Model2RomDir:  return "model2_rom_dir";
+        case T::Model3RomDir:  return "model3_rom_dir";
+        case T::NvramDir:      return "nvram_dir";
+        case T::ScreenshotDir: return "screenshot_dir";
+        case T::BezelDir:      return "bezel_dir";
+        case T::CrosshairDir:  return "crosshair_dir";
+        case T::None:          break;
+    }
+    return "";
+}
+
+/// A folder as the Files app names it, for the touch overlay: the app's
+/// Documents folder is "Keisho" there, and a sandbox path means nothing to
+/// anyone. Folders picked elsewhere are named by where Files shows them.
+std::string touch_path_label(const std::string& path)
+{
+    const char* home = std::getenv("HOME");
+    if (home == nullptr || path.empty()) return path;
+    // `path` below `marker`, as "name / rest", or empty if it is not there.
+    const auto under = [&](const std::string& marker, const char* name) -> std::string {
+        const usize at = path.find(marker);
+        if (at == std::string::npos) return {};
+        const usize rest = at + marker.size();
+        if (rest >= path.size()) return name;
+        if (path[rest] != '/') return {};
+        return rest + 1 < path.size() ? std::string(name) + " / " + path.substr(rest + 1) : std::string(name);
+    };
+    const std::string docs = std::string(home) + "/Documents";
+    for (const std::string& s : {under(docs, "Keisho"),
+                                 under("/File Provider Storage", "On My iPhone"),
+                                 under("/com~apple~CloudDocs", "iCloud Drive")}) {
+        if (!s.empty()) return s;
+    }
+    if (path.rfind(home, 0) == 0) return "Inside the app";  // not shown in Files
+    return std::filesystem::path(path).filename().string();
+}
+
+}  // namespace
+
 void Gui::page_paths(ui::Kit& kit, Config& config)
 {
     const auto dir_row = [&](const char* name, const char* about, std::string& value, DirPickerTarget target,
@@ -1353,8 +1541,20 @@ void Gui::page_paths(ui::Kit& kit, Config& config)
         if (tip != nullptr) kit.tip(tip);
         ui::Kit::Opts opts;
         opts.id = name;
-        kit.field(name, about, value, empty_means, tr("Browse..."), &browse, opts);
-        if (browse) {
+        if (m_touch_ui) {
+            // No typing paths on a phone: show where it is, Browse to change it.
+            opts.read_only    = true;
+            std::string shown = touch_path_label(value);
+            kit.field(name, about, shown, empty_means, tr("Browse..."), &browse, opts);
+        } else {
+            kit.field(name, about, value, empty_means, tr("Browse..."), &browse, opts);
+        }
+        if (browse && m_touch_ui && osd::native_folder_picker_available()) {
+            // The Files app's own picker; the result lands in a later frame.
+            osd::pick_folder(m_window, dir_picker_key(target), [this, target](std::string path) {
+                if (!path.empty()) m_native_pick = NativePick{target, std::move(path)};
+            });
+        } else if (browse) {
             open_dir_picker(target, value);
         }
     };
@@ -4576,6 +4776,9 @@ void Gui::draw_picker(Config& config)
         }
         const float  search_w = kit.px(230.0f);
         const ImVec2 search_at(cog_at.x - kit.px(8.0f) - search_w, head_top + (head_h - kit.px(26.0f)) * 0.5f);
+        // No search on a touch screen: it would need the on-screen keyboard.
+        // The system tabs and scrolling find a game there.
+        if (!m_touch_ui) {
         // A letter or digit typed with nothing else taking it starts a search:
         // the field then takes the rest. (SDL sends text only to a field, so
         // the first key is read as a key.)
@@ -4624,6 +4827,7 @@ void Gui::draw_picker(Config& config)
                 m_picker_search[0] = '\0';
             }
         }
+        }  // !m_touch_ui
 
         // The systems in the middle.
         const ImVec2 seg_size = kit.segments_size(systems);
@@ -4648,22 +4852,32 @@ void Gui::draw_picker(Config& config)
     // -- the foot: the keys ----------------------------------------------------
     const float foot_h = kit.px(30.0f);
     {
-        std::string hint = trf("Enter: play   %s: settings   %s: quit", hotkey_label(config, Config::Hotkey::Overlay),
-                               hotkey_label(config, Config::Hotkey::Quit));
-        if (io.BackendFlags & ImGuiBackendFlags_HasGamepad) {
-            hint = std::string(tr("A: play")) + "   " + hint;
+        std::string hint;
+        if (m_touch_ui) {
+            // No keyboard: tap to play, or the pad's own buttons.
+            hint = (io.BackendFlags & ImGuiBackendFlags_HasGamepad) ? tr("A: play") : "";
+        } else {
+            hint = trf("Enter: play   %s: settings   %s: quit", hotkey_label(config, Config::Hotkey::Overlay),
+                       hotkey_label(config, Config::Hotkey::Quit));
+            if (io.BackendFlags & ImGuiBackendFlags_HasGamepad) {
+                hint = std::string(tr("A: play")) + "   " + hint;
+            }
         }
         const float w = ImGui::CalcTextSize(hint.c_str()).x;
         list->AddText(ImVec2(origin.x + room.x - margin - w, origin.y + room.y - foot_h + (foot_h - font) * 0.5f),
                       p.faint, hint.c_str());
         list->AddText(ImVec2(origin.x + margin, origin.y + room.y - foot_h + (foot_h - font) * 0.5f), p.faint,
-                      tr("Type to search. Arrows or the D-pad choose."));
+                      m_touch_ui ? tr("Tap a game, then tap it again to play. Or the D-pad and A.")
+                                 : tr("Type to search. Arrows or the D-pad choose."));
     }
 
     if (m_picker_entries.empty()) {
         const ImVec2 at(origin.x + margin, head_top + head_h + kit.px(30.0f));
         list->AddText(ImGui::GetFont(), font, at, p.muted,
-                      tr("No ROM archives were found in the ROM folders. Set them in Settings > Paths, then relaunch."),
+                      m_touch_ui
+                          ? tr("No ROM archives were found. In the Files app, put .zip ROM sets in "
+                               "On My iPhone (or iPad) > Keisho; they show here when you come back.")
+                          : tr("No ROM archives were found in the ROM folders. Set them in Settings > Paths, then relaunch."),
                       nullptr, room.x - margin * 2.0f);
         ImGui::End();
         ImGui::PopStyleColor();

@@ -40,3 +40,6 @@ tests/
 tools/
 cfg/
 snap/
+
+# Prebuilt iOS dependencies (MoltenVK), fetched by hand — see BUILDING.md
+3rdparty/ios/

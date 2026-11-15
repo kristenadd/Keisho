@@ -33,6 +33,15 @@ if(NOT EXISTS "${SM2_3RDPARTY}/musashi/m68kmake.c")
         "  git submodule update --init --recursive")
 endif()
 
+# iOS: Homebrew's packages are macOS builds and cannot link into an iOS app, so
+# every dependency comes from 3rdparty/ and curl is left out (the picker runs
+# offline). MoltenVK stands in for the Vulkan loader, below.
+if(SM2_PLATFORM_IOS)
+    foreach(pkg SDL3 miniz pugixml imgui lzmasdk CURL VulkanMemoryAllocator)
+        set(CMAKE_DISABLE_FIND_PACKAGE_${pkg} TRUE)
+    endforeach()
+endif()
+
 # ---------------------------------------------------------------------------
 # Vulkan — headers + loader library
 # ---------------------------------------------------------------------------
@@ -40,7 +49,39 @@ endif()
 # than through volk: one device and one submitting thread make volk's saving
 # not worth it. glslc (below) is required regardless, as it also lints the GL
 # shaders.
-if(SM2_BUILD_VULKAN)
+if(SM2_BUILD_VULKAN AND SM2_PLATFORM_IOS)
+    # iOS has no Vulkan loader: MoltenVK is linked statically and exports the
+    # vk* entry points itself. Its prebuilt static xcframework is unpacked under
+    # 3rdparty/ios/ (not committed; BUILDING.md says where to get it).
+    set(SM2_MOLTENVK_DIR "${SM2_3RDPARTY}/ios/MoltenVK/MoltenVK" CACHE PATH
+        "MoltenVK release folder holding include/ and static/MoltenVK.xcframework")
+    if(SM2_IOS_SIMULATOR)
+        set(sm2_mvk_slice "ios-arm64_x86_64-simulator")
+    else()
+        set(sm2_mvk_slice "ios-arm64")
+    endif()
+    set(sm2_mvk_lib "${SM2_MOLTENVK_DIR}/static/MoltenVK.xcframework/${sm2_mvk_slice}/libMoltenVK.a")
+    if(NOT EXISTS "${sm2_mvk_lib}")
+        message(FATAL_ERROR
+            "MoltenVK for iOS was not found at\n  ${sm2_mvk_lib}\n"
+            "Download MoltenVK-all.tar from "
+            "https://github.com/KhronosGroup/MoltenVK/releases, unpack it so that "
+            "3rdparty/ios/MoltenVK/MoltenVK/static/MoltenVK.xcframework exists "
+            "(or point SM2_MOLTENVK_DIR at it), and configure again.")
+    endif()
+    add_library(Vulkan::Vulkan STATIC IMPORTED GLOBAL)
+    set_target_properties(Vulkan::Vulkan PROPERTIES
+        IMPORTED_LOCATION "${sm2_mvk_lib}"
+        INTERFACE_INCLUDE_DIRECTORIES "${SM2_MOLTENVK_DIR}/include"
+        INTERFACE_LINK_LIBRARIES
+            "-framework Metal;-framework MetalKit;-framework Foundation;-framework QuartzCore;-framework CoreGraphics;-framework IOSurface;-framework UIKit;c++")
+    set(Vulkan_FOUND TRUE)
+    set(Vulkan_INCLUDE_DIR "${SM2_MOLTENVK_DIR}/include")
+    file(STRINGS "${SM2_MOLTENVK_DIR}/include/vulkan/vulkan_core.h" sm2_vk_hdr
+         REGEX "^#define VK_HEADER_VERSION ")
+    string(REGEX MATCH "[0-9]+$" Vulkan_VERSION "${sm2_vk_hdr}")
+    set(Vulkan_VERSION "1.4.${Vulkan_VERSION} (MoltenVK ${sm2_mvk_slice})")
+elseif(SM2_BUILD_VULKAN)
     find_package(Vulkan QUIET)
     if(NOT Vulkan_FOUND)
         message(FATAL_ERROR
@@ -325,6 +366,15 @@ else()
     if(NOT MSVC)
         target_compile_options(sm2_imgui PRIVATE -w)
     endif()
+    # The iOS Simulator's GPU has no base-vertex draws, so the Vulkan backend
+    # merges ImGui's lists there (render/vk/vulkan_backend.cpp), which needs
+    # 32-bit indices. Every ImGui copy must agree on the index size.
+    if(SM2_PLATFORM_IOS AND SM2_IOS_SIMULATOR)
+        set(SM2_IMGUI_DEFS "ImDrawIdx=unsigned int")
+    else()
+        set(SM2_IMGUI_DEFS "")
+    endif()
+    target_compile_definitions(sm2_imgui PUBLIC ${SM2_IMGUI_DEFS})
 
     # sm2_imgui_vk: ImGui with its Vulkan renderer backend.
     if(SM2_BUILD_VULKAN)
@@ -350,6 +400,7 @@ else()
         target_compile_definitions(sm2_imgui_vk PRIVATE
             IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
         )
+        target_compile_definitions(sm2_imgui_vk PUBLIC ${SM2_IMGUI_DEFS})
         if(NOT MSVC)
             target_compile_options(sm2_imgui_vk PRIVATE -w)
         endif()
@@ -427,7 +478,25 @@ file(COPY
 # is built as a separate ExternalProject with the host compiler, ignoring any
 # cross toolchain file.
 include(ExternalProject)
+# An iOS build must still make this tool for the Mac. Under the Xcode
+# generator it would otherwise become an iOS target (and ask to be signed), and
+# Xcode's SDKROOT, inherited by the sub-build, would aim it at iOS too. So: its
+# own Makefiles, with Xcode's per-SDK variables cleared and the macOS SDK named.
+set(sm2_host_generator)
+if(SM2_PLATFORM_IOS)
+    set(sm2_host_env ${CMAKE_COMMAND} -E env --unset=SDKROOT --unset=IPHONEOS_DEPLOYMENT_TARGET
+                     --unset=PLATFORM_NAME --unset=EFFECTIVE_PLATFORM_NAME)
+    set(sm2_host_generator
+        CMAKE_GENERATOR "Unix Makefiles"
+        CONFIGURE_COMMAND ${sm2_host_env} ${CMAKE_COMMAND} -G "Unix Makefiles"
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_SYSROOT=macosx
+            "-DSM2_M68KMAKE_SRC=${SM2_MUSASHI_DIR}/m68kmake.c"
+            "-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>" <SOURCE_DIR>
+        BUILD_COMMAND   ${sm2_host_env} ${CMAKE_COMMAND} --build <BINARY_DIR>
+        INSTALL_COMMAND ${sm2_host_env} ${CMAKE_COMMAND} --install <BINARY_DIR>)
+endif()
 ExternalProject_Add(m68kmake_host
+    ${sm2_host_generator}
     SOURCE_DIR   "${CMAKE_SOURCE_DIR}/cmake/m68kmake-host"
     CMAKE_ARGS
         "-DCMAKE_BUILD_TYPE=Release"

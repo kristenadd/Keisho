@@ -44,6 +44,7 @@
 #include "osd/audio.h"
 #include "osd/outputs.h"
 #include "osd/frame_pacer.h"
+#include "osd/folder_picker.h"
 #include "osd/gui.h"
 #include "osd/i18n.h"
 #include "osd/input.h"
@@ -61,6 +62,14 @@
 #include <memory>
 
 #include <SDL3/SDL.h>
+#if defined(__APPLE__)
+#  include <TargetConditionals.h>
+#endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+// UIKit must own the process: SDL's main starts UIApplicationMain and runs
+// ours as SDL_main inside it.
+#  include <SDL3/SDL_main.h>
+#endif
 
 #include <imgui_impl_sdl3.h>
 
@@ -1095,6 +1104,8 @@ int main(int argc, char** argv)
     const std::string config_dir =
         std::filesystem::path(config_path).parent_path().string();
     resolve_default_paths(&options.config, config_in_cwd, config_dir);
+    // Folders picked with the system picker in earlier sessions (iOS).
+    osd::restore_folder_access(&options.config);
 
     log::Level level = log::Level::Info;
     (void)parse_log_level(options.config.log_level, &level);
@@ -2162,6 +2173,14 @@ int main(int argc, char** argv)
             }
         }
         bool return_to_picker_requested = false;  ///< Set by the exit key; unload + picker.
+        // A tap on the game opens the settings (touch_ui). Only a touch that
+        // began over the running game counts, so the tap that launched it from
+        // the game list, or one that closed the overlay, does not.
+        bool touch_began_in_game = false;
+        // iOS forbids GPU work in the background: stop drawing until the app
+        // returns, and look for new ROMs then (added through the Files app).
+        bool in_background        = false;
+        bool rescan_on_foreground = false;
         std::string dropped_path;  ///< A file dropped on the window, launched next frame.
 
         // A pending save-state action from a hotkey or the overlay, serviced
@@ -2383,6 +2402,38 @@ int main(int argc, char** argv)
                             }
                         }
                         break;
+                    case SDL_EVENT_WILL_ENTER_BACKGROUND:
+                    case SDL_EVENT_DID_ENTER_BACKGROUND:
+                        if (!in_background) {
+                            in_background = true;
+                            if (machine_any != nullptr && gui.touch_ui()) {
+                                gui.show();  // come back paused, on the settings
+                            }
+                            audio_paused_state = true;
+                            audio.set_paused(true);
+                            input.release_force_feedback();
+                        }
+                        break;
+                    case SDL_EVENT_WILL_ENTER_FOREGROUND:
+                    case SDL_EVENT_DID_ENTER_FOREGROUND:
+                        if (in_background) {
+                            in_background        = false;
+                            rescan_on_foreground = machine_any == nullptr && gui.picker_active();
+                            pacer.resync();
+                        }
+                        break;
+                    case SDL_EVENT_FINGER_DOWN:
+                        touch_began_in_game = gui.touch_ui() && machine_any != nullptr && !gui.visible()
+                                           && !gui.picker_active() && !gui.load_error_open();
+                        input.handle_event(event);
+                        break;
+                    case SDL_EVENT_FINGER_UP:
+                        if (touch_began_in_game && !gui.visible() && machine_any != nullptr) {
+                            gui.show();
+                        }
+                        touch_began_in_game = false;
+                        input.handle_event(event);
+                        break;
                     case SDL_EVENT_DROP_FILE:
                         if (event.drop.data != nullptr) {
                             dropped_path = event.drop.data;
@@ -2407,6 +2458,14 @@ int main(int argc, char** argv)
             if (!running) {
                 break;
             }
+            if (in_background) {
+                SDL_Delay(50);
+                continue;
+            }
+            if (rescan_on_foreground) {
+                rescan_on_foreground = false;
+                show_picker();
+            }
 
             // The pad's Guide shortcuts, read before poll() so their buttons stay
             // out of the game.
@@ -2422,6 +2481,14 @@ int main(int argc, char** argv)
             }
             if (pad_shortcuts.screenshot) {
                 screenshot_requested = true;
+            }
+            // The overlay's "Game list" button (touch), as the Exit key.
+            if (gui.take_exit_request() && machine_any != nullptr) {
+                if (will_show_picker) {
+                    return_to_picker_requested = true;
+                } else {
+                    running = false;
+                }
             }
             if (!gui.visible() && machine_any != nullptr) {
                 if (pad_shortcuts.save) {

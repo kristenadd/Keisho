@@ -25,6 +25,11 @@
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <string_view>
+
+#if defined(__APPLE__)
+#  include <TargetConditionals.h>
+#endif
 
 namespace sm2 {
 namespace {
@@ -340,9 +345,38 @@ std::string data_directory(bool config_in_cwd)
     return ".";
 }
 
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+namespace {
+
+/// iOS moves an app's data container (…/Data/Application/<UUID>) between
+/// installs and launches, so a path saved last time can point into a container
+/// that is gone. Re-root such a path at the current one ($HOME).
+void rebase_container_path(std::string* path)
+{
+    static constexpr std::string_view kMarker = "/Data/Application/";
+    constexpr usize                   kUuidLen = 36;
+    const char*                       home     = environment("HOME");
+    if (home == nullptr || path->empty()) return;
+    const usize at = path->find(kMarker);
+    if (at == std::string::npos) return;
+    const usize end = at + kMarker.size() + kUuidLen;
+    if (end > path->size() || (end < path->size() && (*path)[end] != '/')) return;
+    *path = std::string(home) + path->substr(end);
+}
+
+}  // namespace
+#endif
+
 void resolve_default_paths(Config* config, bool config_in_cwd,
                            const std::string& config_dir)
 {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    for (std::string* path : {&config->model1_rom_dir, &config->model2_rom_dir, &config->model3_rom_dir,
+                              &config->nvram_dir, &config->screenshot_dir, &config->bezel_dir,
+                              &config->crosshair_dir}) {
+        rebase_container_path(path);
+    }
+#endif
     const std::filesystem::path base = data_directory(config_in_cwd);
     if (config->nvram_dir.empty()) {
         config->nvram_dir = (base / "saves").string();
@@ -359,7 +393,30 @@ void resolve_default_paths(Config* config, bool config_in_cwd,
             config_dir.empty() ? std::filesystem::path(".") : std::filesystem::path(config_dir);
         config->artwork_dir = (dir / "artwork").string();
     }
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    // iOS: the app's Documents folder, which the Files app shows as "On My
+    // iPhone/iPad > Keisho" (UIFileSharingEnabled). Model 1 and 3 sets share it
+    // unless their own folders are set.
+    if (config->model2_rom_dir.empty() && config->model1_rom_dir.empty()
+        && config->model3_rom_dir.empty()) {
+        if (const char* home = environment("HOME")) {
+            config->model2_rom_dir = (std::filesystem::path(home) / "Documents").string();
+        }
+    }
+    // The Files app lists an app's folder only once it holds something, so a
+    // fresh install leaves a note there saying what goes in it.
+    if (const char* home = environment("HOME")) {
+        const std::filesystem::path docs = std::filesystem::path(home) / "Documents";
+        std::error_code             ec;
+        if (std::filesystem::is_empty(docs, ec) && !ec) {
+            std::ofstream note(docs / "Put ROM zip files here.txt");
+            note << "Copy Sega Model 1, 2 and 3 ROM sets here, one .zip or .7z per game, named as in MAME "
+                    "(vf3.zip, daytona2.zip, ...).\n\nKeisho rescans this folder when you switch back to it.\n";
+        }
+    }
+#else
     // model2_rom_dir intentionally left empty: no sensible default.
+#endif
 }
 
 namespace {

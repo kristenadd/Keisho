@@ -35,6 +35,12 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Objective-C++ for the Apple glue (macOS menu, iOS folder picker); enabled
+# here, at the top, as CMake requires.
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
+
 # Apple's ld warns on every static library CMake repeats for link order.
 if(APPLE)
     include(CheckLinkerFlag)
@@ -102,6 +108,23 @@ set_property(CACHE SM2_EVDEV PROPERTY STRINGS AUTO ON OFF)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(SM2_PLATFORM_LINUX TRUE)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # iPhone and iPad. Vulkan through a statically linked MoltenVK is the only
+    # renderer that can present (iOS's OpenGL ES stops at 3.0), and there is no
+    # JIT: the PowerPC runs on its interpreter. See BUILDING.md.
+    set(SM2_PLATFORM_IOS TRUE)
+    set(SM2_BUILD_VULKAN         ON  CACHE BOOL "Build the Vulkan backend" FORCE)
+    set(SM2_BUILD_OPENGL_DESKTOP OFF CACHE BOOL "Build the OpenGL 4.3 core desktop backend" FORCE)
+    set(SM2_BUILD_OPENGL_ES      OFF CACHE BOOL "Build the OpenGL ES 3.1 backend (ARM)" FORCE)
+    if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "16.0" CACHE STRING "Minimum iOS version" FORCE)
+    endif()
+    # Simulator or device decides which MoltenVK slice is linked.
+    if(CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
+        set(SM2_IOS_SIMULATOR TRUE)
+    else()
+        set(SM2_IOS_SIMULATOR FALSE)
+    endif()
 elseif(APPLE)
     set(SM2_PLATFORM_MACOS TRUE)
 elseif(WIN32)
@@ -156,6 +179,9 @@ endif()
 message(STATUS "")
 message(STATUS "Keisho ${PROJECT_VERSION}")
 message(STATUS "  system          : ${CMAKE_SYSTEM_NAME} / ${CMAKE_SYSTEM_PROCESSOR}")
+if(SM2_PLATFORM_IOS)
+    message(STATUS "  iOS target      : ${CMAKE_OSX_DEPLOYMENT_TARGET}, simulator=${SM2_IOS_SIMULATOR}")
+endif()
 message(STATUS "  build type      : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  compiler        : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 if(SM2_BUILD_OPENGL_ES)

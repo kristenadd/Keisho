@@ -31,6 +31,7 @@ struct RowOpts {
     bool        disabled = false;   ///< drawn faint, not interactive
     const char* id       = nullptr; ///< ImGui ID when the name repeats in a group
     const char* badge    = nullptr; ///< a short word after the name, e.g. "next launch"
+    bool        read_only = false;  ///< field(): shown, not typed into (no on-screen keyboard)
 };
 
 /// Where keyboard and gamepad focus is among the kit's rows, kept by the owner
@@ -64,6 +65,11 @@ struct NavState {
 /// One Kit is made per frame.
 class Kit {
 public:
+    /// Touch screen with no keyboard (iOS): fields are shown, not typed into,
+    /// and the lists' type-to-filter boxes are left out.
+    static void set_touch_only(bool on);
+    [[nodiscard]] static bool touch_only();
+
     enum class Tone { Plain, Primary, Danger };
 
     /// The small vector icons the kit draws itself, so they take the theme's

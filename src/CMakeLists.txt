@@ -396,9 +396,16 @@ add_library(sm2_osd STATIC
     osd/wheel_ffb.cpp
     osd/window.cpp
 )
+# The system folder picker: the Files app's on iOS; elsewhere the overlay's own.
+if(SM2_PLATFORM_IOS)
+    target_sources(sm2_osd PRIVATE osd/folder_picker_ios.mm)
+    set_source_files_properties(osd/folder_picker_ios.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_link_libraries(sm2_osd PRIVATE "-framework UIKit" "-framework UniformTypeIdentifiers")
+else()
+    target_sources(sm2_osd PRIVATE osd/folder_picker_none.cpp)
+endif()
 # The host's application menu: a "Settings..." item on macOS, nothing elsewhere.
 if(SM2_PLATFORM_MACOS)
-    enable_language(OBJCXX)
     target_sources(sm2_osd PRIVATE osd/app_menu_macos.mm)
     target_link_libraries(sm2_osd PRIVATE "-framework Cocoa")
 else()
@@ -408,7 +415,7 @@ endif()
 if(SM2_HAVE_FONTCONFIG)
     target_sources(sm2_osd PRIVATE osd/sysfont_fontconfig.cpp)
     target_link_libraries(sm2_osd PRIVATE PkgConfig::FONTCONFIG)
-elseif(SM2_PLATFORM_MACOS)
+elseif(SM2_PLATFORM_MACOS OR SM2_PLATFORM_IOS)
     target_sources(sm2_osd PRIVATE osd/sysfont_coretext.cpp)
     target_link_libraries(sm2_osd PRIVATE "-framework CoreText" "-framework CoreFoundation")
 elseif(SM2_PLATFORM_WINDOWS)
@@ -500,6 +507,61 @@ if(SM2_PLATFORM_MACOS)
     target_sources(keisho PRIVATE ${SM2_LANG_FONTS})
     set_source_files_properties(${SM2_LANG_FONTS}
         PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/lang/fonts")
+elseif(SM2_PLATFORM_IOS)
+    # An iPhone/iPad app. Its bundle is flat: games.xml and lang/ sit beside the
+    # executable (staged below), which GameDatabase::locate and i18n look in.
+    # Ninja builds it for the Simulator; the Xcode generator also signs it for
+    # a device (set SM2_IOS_TEAM to your Apple developer team id).
+    if(SM2_IOS_SIMULATOR)
+        set(SM2_IOS_PLATFORM "iPhoneSimulator")
+    else()
+        set(SM2_IOS_PLATFORM "iPhoneOS")
+    endif()
+    set(SM2_IOS_BUNDLE_ID "io.github.keisho-emu.keisho" CACHE STRING "iOS bundle identifier")
+    set(SM2_IOS_TEAM "" CACHE STRING "Apple developer team id for device signing (Xcode generator)")
+    configure_file("${CMAKE_SOURCE_DIR}/cmake/Info-iOS.plist.in"
+                   "${CMAKE_BINARY_DIR}/Info-iOS.plist.in" @ONLY)
+    # @ONLY kept the MACOSX_BUNDLE_* names for CMake's own pass; expand ours now.
+    file(READ "${CMAKE_BINARY_DIR}/Info-iOS.plist.in" sm2_plist)
+    string(REPLACE "\${SM2_IOS_PLATFORM}" "${SM2_IOS_PLATFORM}" sm2_plist "${sm2_plist}")
+    string(REPLACE "\${CMAKE_OSX_DEPLOYMENT_TARGET}" "${CMAKE_OSX_DEPLOYMENT_TARGET}" sm2_plist "${sm2_plist}")
+    file(WRITE "${CMAKE_BINARY_DIR}/Info-iOS.plist.in" "${sm2_plist}")
+    set_target_properties(keisho PROPERTIES
+        OUTPUT_NAME   "Keisho"
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_INFO_PLIST      "${CMAKE_BINARY_DIR}/Info-iOS.plist.in"
+        MACOSX_BUNDLE_BUNDLE_NAME     "Keisho"
+        MACOSX_BUNDLE_GUI_IDENTIFIER  "${SM2_IOS_BUNDLE_ID}"
+        MACOSX_BUNDLE_BUNDLE_VERSION        "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING  "${PROJECT_VERSION}"
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${SM2_IOS_BUNDLE_ID}"
+        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY    "1,2"
+        XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}"
+        XCODE_ATTRIBUTE_ENABLE_BITCODE            "NO")
+    if(SM2_IOS_TEAM)
+        set_target_properties(keisho PROPERTIES
+            XCODE_ATTRIBUTE_DEVELOPMENT_TEAM   "${SM2_IOS_TEAM}"
+            XCODE_ATTRIBUTE_CODE_SIGN_STYLE    "Automatic"
+            XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Apple Development")
+    endif()
+    # Home-screen icons, scaled from the 512px PNG at configure time.
+    set(sm2_icon_src "${CMAKE_SOURCE_DIR}/data/icons/keisho-512.png")
+    set(sm2_icon_dir "${CMAKE_BINARY_DIR}/ios-icons")
+    file(MAKE_DIRECTORY "${sm2_icon_dir}")
+    set(SM2_IOS_ICONS)
+    foreach(spec "AppIcon60x60@2x.png:120" "AppIcon60x60@3x.png:180"
+                 "AppIcon76x76@2x.png:152" "AppIcon83.5x83.5@2x.png:167")
+        string(REPLACE ":" ";" spec "${spec}")
+        list(GET spec 0 sm2_icon_name)
+        list(GET spec 1 sm2_icon_px)
+        set(sm2_icon_out "${sm2_icon_dir}/${sm2_icon_name}")
+        if(NOT EXISTS "${sm2_icon_out}")
+            execute_process(COMMAND sips -z ${sm2_icon_px} ${sm2_icon_px}
+                                    "${sm2_icon_src}" --out "${sm2_icon_out}"
+                            OUTPUT_QUIET ERROR_QUIET)
+        endif()
+        list(APPEND SM2_IOS_ICONS "${sm2_icon_out}")
+    endforeach()
 elseif(SM2_PLATFORM_WINDOWS)
     # Compile the .ico into the .exe so Explorer and the taskbar show it. The
     # running window's icon is set in osd/window.cpp.
@@ -554,6 +616,21 @@ if(NOT SM2_PLATFORM_MACOS)
         VERBATIM
     )
 endif()
+if(SM2_PLATFORM_IOS)
+    foreach(icon IN LISTS SM2_IOS_ICONS)
+        add_custom_command(TARGET keisho POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${icon}" "$<TARGET_FILE_DIR:keisho>/"
+            VERBATIM)
+    endforeach()
+    # Ninja leaves the bundle unsigned; the Simulator accepts an ad hoc
+    # signature. Xcode signs on its own.
+    if(NOT CMAKE_GENERATOR STREQUAL "Xcode")
+        add_custom_command(TARGET keisho POST_BUILD
+            COMMAND codesign --force --sign - --timestamp=none "$<TARGET_BUNDLE_DIR:keisho>"
+            COMMENT "Signing Keisho.app ad hoc"
+            VERBATIM)
+    endif()
+endif()
 
 target_compile_definitions(sm2_osd PRIVATE SM2_VERSION="${PROJECT_VERSION}")
 target_compile_definitions(keisho PRIVATE
@@ -590,7 +667,7 @@ include(GNUInstallDirs)
 
 set(SM2_ICON_DIR "${CMAKE_SOURCE_DIR}/data/icons")
 
-if(SM2_PLATFORM_MACOS)
+if(SM2_PLATFORM_MACOS OR SM2_PLATFORM_IOS)
     # The .app is self-contained and needs nothing alongside it.
     install(TARGETS keisho BUNDLE DESTINATION ".")
 elseif(SM2_PLATFORM_WINDOWS)

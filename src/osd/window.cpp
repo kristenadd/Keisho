@@ -25,6 +25,10 @@
 
 #include <algorithm>
 
+#if defined(__APPLE__)
+#  include <TargetConditionals.h>
+#endif
+
 namespace sm2::osd {
 
 Window::~Window()
@@ -72,9 +76,18 @@ bool Window::create(const WindowConfig& config)
     if (config.resizable) {
         flags |= SDL_WINDOW_RESIZABLE;
     }
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    // iOS: the whole screen, always, at the panel's own pixel density (the
+    // overlay would otherwise be drawn at 1x and stretched). Resizable, so it
+    // follows rotation and iPad window sizes; Info.plist narrows the
+    // orientations per device (landscape on iPhone, any on iPad).
+    flags |= SDL_WINDOW_FULLSCREEN | SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIGH_PIXEL_DENSITY
+           | SDL_WINDOW_RESIZABLE;
+#else
     if (config.fullscreen) {
         flags |= SDL_WINDOW_FULLSCREEN;
     }
+#endif
 
     m_window = SDL_CreateWindow(config.title.c_str(),
                                 static_cast<int>(config.width),
@@ -91,6 +104,9 @@ bool Window::create(const WindowConfig& config)
         apply_fullscreen_resolution();
     }
 
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    m_fullscreen = true;  // the home-screen icon comes from the bundle
+#else
     // The surface references the static pixels without copying, and
     // SDL_SetWindowIcon takes its own copy. Failure just keeps the default icon.
     if (SDL_Surface* icon = SDL_CreateSurfaceFrom(
@@ -103,6 +119,7 @@ bool Window::create(const WindowConfig& config)
     } else {
         SM2_WARN("could not create icon surface: %s", SDL_GetError());
     }
+#endif
 
     u32 pixel_width = 0;
     u32 pixel_height = 0;
@@ -219,6 +236,10 @@ void Window::apply_fullscreen_resolution()
 
 void Window::set_fullscreen(bool enable)
 {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    (void)enable;  // always fullscreen on iOS
+    return;
+#endif
     if (m_window == nullptr || enable == m_fullscreen) {
         return;
     }

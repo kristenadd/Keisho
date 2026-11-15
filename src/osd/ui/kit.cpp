@@ -29,6 +29,9 @@ namespace sm2::osd::ui {
 
 namespace {
 
+/// Kit::set_touch_only(): no typing, for a touch screen without a keyboard.
+bool g_touch_only = false;
+
 // Sizes in points; px() scales them.
 constexpr float kRowPadX     = 12.0f;  ///< inside a group frame, left and right
 constexpr float kRowPadY     = 8.0f;   ///< above and below a row's content
@@ -966,7 +969,9 @@ bool Kit::dropdown_impl(const char* name, const char* about, std::span<const std
     ImGui::SetNextWindowSizeConstraints(ImVec2(size.x, 0.0f), ImVec2(size.x * 1.6f, px(360.0f)));
     if (ImGui::BeginPopup("list")) {
         std::string needle;
-        if (filter != nullptr && filter_size > 0) {
+        if (filter != nullptr && filter_size > 0 && g_touch_only) {
+            filter[0] = '\0';  // no keyboard to type a filter with
+        } else if (filter != nullptr && filter_size > 0) {
             if (ImGui::IsWindowAppearing()) {
                 filter[0] = '\0';
                 ImGui::SetKeyboardFocusHere();
@@ -1028,7 +1033,8 @@ bool Kit::number(const char* name, const char* about, int& value, int lo, int hi
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, px(kCtrlRound));
     int typed = value;
     if (ImGui::InputScalar("##n", ImGuiDataType_S32, &typed, nullptr, nullptr, "%d",
-                           ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+                           ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll
+                               | (g_touch_only ? ImGuiInputTextFlags_ReadOnly : ImGuiInputTextFlags_None))) {
         const int next = std::clamp(typed, lo, hi);
         if (next != value) { value = next; changed = true; }
     }
@@ -1050,6 +1056,16 @@ bool Kit::number(const char* name, const char* about, int& value, int lo, int hi
     ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, placed.bottom));
     end_row(placed, field_hot || field_focused);
     return changed;
+}
+
+void Kit::set_touch_only(bool on)
+{
+    g_touch_only = on;
+}
+
+bool Kit::touch_only()
+{
+    return g_touch_only;
 }
 
 bool Kit::field(const char* name, const char* about, std::string& text, const char* hint, const char* button_label,
@@ -1077,7 +1093,9 @@ bool Kit::field(const char* name, const char* about, std::string& text, const ch
     std::snprintf(buf, sizeof buf, "%s", text.c_str());
     if (!opts.disabled) nav_row(false);
     if (opts.disabled) ImGui::BeginDisabled();
-    if (ImGui::InputTextWithHint("##f", hint != nullptr ? hint : "", buf, sizeof buf)) {
+    if (ImGui::InputTextWithHint("##f", hint != nullptr ? hint : "", buf, sizeof buf,
+                                 (opts.read_only || g_touch_only) ? ImGuiInputTextFlags_ReadOnly
+                                                                  : ImGuiInputTextFlags_None)) {
         text    = buf;
         changed = true;
     }

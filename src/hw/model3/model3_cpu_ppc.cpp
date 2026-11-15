@@ -19,6 +19,10 @@
 #include "cpu/ppc/ppc.h"
 #include "hw/model3/ports.h"
 
+#if defined(__APPLE__)
+#  include <TargetConditionals.h>
+#endif
+
 namespace sm2::hw::model3 {
 namespace {
 
@@ -28,7 +32,12 @@ public:
               cpu::ppc::PpcBus& bus) override
     {
         m_ppc.init(config, pages, bus);
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        // No executable memory on iOS: the IR interpreter is the engine.
+        m_ppc.set_exec_mode(cpu::ppc::ExecMode::Interpreter);
+#else
         m_ppc.set_exec_mode(cpu::ppc::ExecMode::Jit);
+#endif
     }
     void reset() override { m_ppc.reset(); }
     s64  run(s64 cycles) override { return m_ppc.run(cycles); }

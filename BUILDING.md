@@ -254,6 +254,91 @@ Step by step, from a clean machine:
    MoltenVK with the bundled Vulkan loader and signs the app ad hoc, so it runs
    on a Mac without Homebrew or the Vulkan SDK. The release dmg is made this way.
 
+## iOS and iPadOS
+
+Keisho runs on iPhone and iPad (iOS 16 or newer) as a normal app, built from
+the same tree with CMake's iOS support. What differs from macOS:
+
+- **No JIT.** iOS gives an app no executable memory, so Model 3's PowerPC runs
+  on its IR interpreter. Model 1 and 2 are interpreters everywhere anyway. On an
+  M3 Max the interpreter holds 2–3.6x real time on the Model 3 sets; recent
+  iPhones and iPads (A17 Pro and newer, M-series) are in the same range per core.
+- **Vulkan only**, through a statically linked MoltenVK (iOS's OpenGL ES stops
+  at 3.0, below the renderer's floor). The software renderer is selectable too.
+- **Every dependency is built from `3rdparty/`.** Homebrew's libraries are
+  macOS builds and are ignored. libcurl is left out, so the game list runs
+  without downloaded artwork.
+- **A game controller is required** (any MFi, Xbox, PlayStation or Switch pad
+  iOS supports). There are no on-screen game controls.
+- **Touch runs the menus, and nothing is typed.** Tap a game to select it and
+  tap again to play; tap the screen during a game to open the settings, whose
+  footer has *Resume* and *Game list* buttons. Settings and lists scroll by
+  dragging. The on-screen keyboard is never raised: the game list has no search
+  box there, and fields are shown rather than edited.
+- **ROMs go in Files.** By default Keisho reads *On My iPhone* (or *iPad*)
+  *> Keisho*, its own Documents folder, which first launch seeds with a note so
+  that Files lists it; the Finder's device page over USB reaches it too. Any
+  other folder Files can see (iCloud Drive, *On My iPhone*, another app's) can be
+  chosen in *Settings > Paths > Browse...*, which opens the Files picker; Keisho
+  keeps a bookmark to reopen it on later launches. Add sets while Keisho is in
+  the background; the list rescans when it comes back.
+
+### Prerequisites
+
+Xcode with the iOS platform installed, the Homebrew tools from the macOS
+section (`cmake ninja shaderc` — only `glslc` is used from it), and MoltenVK
+for iOS. Download `MoltenVK-all.tar` from the
+[MoltenVK releases](https://github.com/KhronosGroup/MoltenVK/releases) (the
+`-ios` tarball has no Simulator slice) and unpack it into `3rdparty/ios/`, so
+that this exists (the folder is gitignored):
+
+```
+3rdparty/ios/MoltenVK/MoltenVK/static/MoltenVK.xcframework/ios-arm64/libMoltenVK.a
+3rdparty/ios/MoltenVK/MoltenVK/static/MoltenVK.xcframework/ios-arm64_x86_64-simulator/libMoltenVK.a
+3rdparty/ios/MoltenVK/MoltenVK/include/
+```
+
+Or pass `-DSM2_MOLTENVK_DIR=/path/to/MoltenVK/MoltenVK` to point at another
+copy.
+
+### Simulator
+
+```sh
+cmake -S . -B build-ios-sim -G Ninja -DCMAKE_SYSTEM_NAME=iOS \
+    -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_ARCHITECTURES=arm64 \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build build-ios-sim
+xcrun simctl install booted build-ios-sim/bin/Keisho.app
+xcrun simctl launch --console-pty booted io.github.keisho-emu.keisho
+```
+
+The Simulator's GPU cannot draw with a base vertex, so a Simulator build uses
+32-bit ImGui indices and merges the overlay's draw lists (see
+`render/vk/vulkan_backend.cpp`). Device builds do not.
+
+### Device
+
+Signing needs your Apple developer team (a free personal team works for your
+own devices), so device builds go through the Xcode generator:
+
+```sh
+cmake -S . -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS \
+    -DSM2_IOS_TEAM=<your team id> \
+    -DSM2_IOS_BUNDLE_ID=com.example.keisho
+open build-ios/keisho.xcodeproj
+```
+
+In Xcode pick the `keisho` scheme and your device, then Run. The team id is
+under *Membership* at developer.apple.com, or in Xcode's *Signing &
+Capabilities* tab, where it can also be set by hand. A personal team needs a
+bundle id of your own, hence `SM2_IOS_BUNDLE_ID`. A Ninja build for
+`-DCMAKE_OSX_SYSROOT=iphoneos` also compiles and links, but is only signed ad
+hoc, which a device will not install.
+
+Without a debugger attached, iOS keeps the app from mapping executable memory,
+which is why the interpreter is always used there. Running from Xcode does not
+change that: the build never asks for the JIT.
+
 ## Windows
 
 Windows builds with **MSVC** (Visual Studio 2022's toolchain) and Ninja. SDL3

@@ -29,6 +29,7 @@
 #include <vector>
 
 struct SDL_Window;
+struct ImGuiWindow;
 
 namespace sm2::osd {
 
@@ -85,6 +86,19 @@ public:
 
     /// Force the overlay visible (e.g. when launched with no ROM).
     void show() { m_visible = true; }
+
+    /// Touch-first overlay (iOS): drag to scroll, larger minimum scale, the
+    /// display's safe area respected, and on-screen buttons for what Esc and
+    /// the Exit key do on a keyboard.
+    [[nodiscard]] bool touch_ui() const { return m_touch_ui; }
+    /// The overlay's "Game list" button was tapped: unload and show the games,
+    /// as the Exit hotkey does. Polled once per frame by the main loop.
+    [[nodiscard]] bool take_exit_request()
+    {
+        const bool out   = m_exit_requested;
+        m_exit_requested = false;
+        return out;
+    }
 
     /// Where the Save button writes. Set to the path the config was loaded from
     /// so a saved file goes back to the same place (including a --config path).
@@ -316,7 +330,15 @@ private:
     void draw_calibration_markers(const class Input* input);
     void draw_sinden_border(const Config& config);
 
+public:
     enum class DirPickerTarget { None, Model1RomDir, Model2RomDir, Model3RomDir, NvramDir, ScreenshotDir, BezelDir, CrosshairDir };
+private:
+    /// A folder the system picker (iOS) returned, applied on the next draw().
+    struct NativePick {
+        DirPickerTarget target = DirPickerTarget::None;
+        std::string     path;
+    };
+    std::optional<NativePick> m_native_pick;
 
     void open_dir_picker(DirPickerTarget target, const std::string& initial);
 
@@ -329,6 +351,19 @@ private:
     std::vector<std::string> m_available_renderers;  ///< for the Settings dropdown
     bool        m_visible     = false;
     bool        m_initialised = false;
+    bool        m_touch_ui    = false;
+    bool        m_exit_requested = false;
+    /// Drag-to-scroll (touch_ui): the window under the finger when it went
+    /// down, whether the drag has become a scroll, and the fling speed after.
+    struct TouchScroll {
+        ImGuiWindow* target    = nullptr;
+        bool         scrolling = false;
+        float        velocity  = 0.0f;  ///< px per second, for the fling
+        ImGuiWindow* fling     = nullptr;
+    };
+    TouchScroll m_touch_scroll;
+    void        apply_safe_area();
+    void        update_touch_scroll();
     float       m_ui_scale    = 0.0f;  ///< applied overlay scale; 0 forces first-frame apply.
     ImGuiStyle  m_base_style;          ///< the style at scale 1, in the theme's colours
     const ui::Palette* m_palette = nullptr;  ///< the theme in use; set by apply_theme() before any drawing

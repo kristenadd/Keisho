@@ -37,7 +37,19 @@
 #  endif
 #endif
 
-#if defined(__APPLE__) && defined(__aarch64__)
+// iOS, iPadOS and the Simulator give an app no executable memory (no MAP_JIT
+// without a debugger attached), so init() refuses there and the cores fall
+// back to their interpreters.
+#if defined(__APPLE__)
+#  include <TargetConditionals.h>
+#endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+#  define SM2_JIT_NO_EXEC_MEMORY 1
+#else
+#  define SM2_JIT_NO_EXEC_MEMORY 0
+#endif
+
+#if defined(__APPLE__) && defined(__aarch64__) && !SM2_JIT_NO_EXEC_MEMORY
 #  define SM2_JIT_MAP_JIT 1
 #else
 #  define SM2_JIT_MAP_JIT 0
@@ -108,6 +120,11 @@ void for_each_hint(usize size, Fn&& fn)
 bool CodeBuffer::init(usize size, bool force_toggle)
 {
     release();
+#if SM2_JIT_NO_EXEC_MEMORY
+    (void)size;
+    (void)force_toggle;
+    return false;
+#endif
     const usize page = host_page_size();
     size             = (size + page - 1) & ~(page - 1);
 

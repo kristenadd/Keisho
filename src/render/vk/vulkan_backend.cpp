@@ -27,7 +27,58 @@
 #include <cstdlib>
 #include <cstring>
 
+#if defined(__APPLE__)
+#  include <TargetConditionals.h>
+#endif
+
 namespace sm2::render::vk {
+
+#if defined(__APPLE__) && TARGET_OS_SIMULATOR
+namespace {
+
+// The iOS Simulator's GPU cannot draw with a non-zero base vertex, which the
+// ImGui backend uses for every draw list after the first. There, ImDrawIdx is
+// 32-bit (CMake) and the lists are merged into one with the vertex offsets
+// folded into the indices, so every draw starts at vertex 0. Real iOS GPUs do
+// not need this.
+ImDrawData* flatten_for_simulator(ImDrawData* src)
+{
+    static_assert(sizeof(ImDrawIdx) == 4, "the Simulator build needs 32-bit ImDrawIdx");
+    static ImDrawList* merged = nullptr;
+    static ImDrawData  flat;
+    if (merged == nullptr) merged = IM_NEW(ImDrawList)(ImGui::GetDrawListSharedData());
+    merged->CmdBuffer.resize(0);
+    merged->IdxBuffer.resize(0);
+    merged->VtxBuffer.resize(0);
+
+    for (const ImDrawList* list : src->CmdLists) {
+        const unsigned base = static_cast<unsigned>(merged->VtxBuffer.Size);
+        for (const ImDrawVert& v : list->VtxBuffer) merged->VtxBuffer.push_back(v);
+        for (const ImDrawCmd& cmd : list->CmdBuffer) {
+            ImDrawCmd out = cmd;
+            if (cmd.UserCallback == nullptr) {
+                out.IdxOffset = static_cast<unsigned>(merged->IdxBuffer.Size);
+                out.VtxOffset = 0;
+                for (unsigned i = 0; i < cmd.ElemCount; ++i) {
+                    merged->IdxBuffer.push_back(list->IdxBuffer[static_cast<int>(cmd.IdxOffset + i)]
+                                                + base + cmd.VtxOffset);
+                }
+            }
+            merged->CmdBuffer.push_back(out);
+        }
+    }
+
+    flat = *src;
+    flat.CmdLists.resize(0);
+    flat.CmdLists.push_back(merged);
+    flat.CmdListsCount = 1;
+    flat.TotalVtxCount = merged->VtxBuffer.Size;
+    flat.TotalIdxCount = merged->IdxBuffer.Size;
+    return &flat;
+}
+
+}  // namespace
+#endif
 
 VulkanBackend::~VulkanBackend()
 {
@@ -339,7 +390,11 @@ void VulkanBackend::draw_overlay(bool active)
     rendering.pColorAttachments    = &colour_att;
 
     device_functions().cmd_begin_rendering(cmd, &rendering);
+#if defined(__APPLE__) && TARGET_OS_SIMULATOR
+    ImGui_ImplVulkan_RenderDrawData(flatten_for_simulator(ImGui::GetDrawData()), cmd);
+#else
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+#endif
     device_functions().cmd_end_rendering(cmd);
 }
 
