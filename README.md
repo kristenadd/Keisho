@@ -304,6 +304,18 @@ Both are set up in the settings menu (`F10`):
   Network outputs in the System tab and let MAMEHooker or Hook Of The Reaper
   fire it.
 
+### Operator menus and regions
+
+Each game's own settings (difficulty, credits, often the region) are in its
+test menu: Guide + R3 on a gamepad, `0` on the keyboard. On Model 3, Service
+(Guide + L3, `9`) outside the test menu only adds a credit.
+
+**Daytona USA 2** hides its region menu. Open the test menu, then hold Start
+and press VR4, VR4, VR2, VR3, VR1, VR3, VR2. With the default layout that is
+Y, Y, B, X, A, X, B on a gamepad (by position: top, top, right, left, bottom,
+left, right), or `,` `,` `N` `M` `B` `M` `N` on the keyboard. Pick the region
+there.
+
 ### Save states
 
 `F6` quick-saves and `F7` quick-loads, using one slot per game. The **States**
