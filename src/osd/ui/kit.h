@@ -185,8 +185,10 @@ public:
     bool button_at(const char* label, ImVec2 at, Tone tone = Tone::Plain, Icon icon = Icon::None,
                    bool enabled = true);
     [[nodiscard]] ImVec2 segments_size(std::span<const char* const> labels) const;
+    /// `nav` false keeps it out of keyboard and pad focus: touch and mouse only,
+    /// for a control the owner steers with keys of its own.
     bool segments_at(const char* id, ImVec2 at, std::span<const char* const> labels, int& value,
-                     bool enabled = true);
+                     bool enabled = true, bool nav = true);
 
     /// The help of the row with focus, or under the mouse, this frame.
     [[nodiscard]] const std::string& focused_tip() const { return m_focused_tip; }

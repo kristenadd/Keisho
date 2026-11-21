@@ -688,7 +688,8 @@ ImVec2 Kit::segments_size(std::span<const char* const> labels) const
     return ImVec2(w, px(kCtrlH));
 }
 
-bool Kit::segments_at(const char* id, ImVec2 at, std::span<const char* const> labels, int& value, bool enabled)
+bool Kit::segments_at(const char* id, ImVec2 at, std::span<const char* const> labels, int& value, bool enabled,
+                      bool nav)
 {
     ImDrawList* list = ImGui::GetWindowDrawList();
     const ImVec2 size = segments_size(labels);
@@ -699,16 +700,20 @@ bool Kit::segments_at(const char* id, ImVec2 at, std::span<const char* const> la
 
     // One item for the whole control: focus lands on it as a unit, and
     // Left/Right move the choice. Clicks pick the cell under the mouse.
-    if (enabled) nav_row(false);
+    if (enabled && nav) nav_row(false);
     ImGui::SetCursorScreenPos(at);
     if (!enabled) ImGui::BeginDisabled();
-    const bool clicked = ImGui::InvisibleButton(id, size, ImGuiButtonFlags_EnableNav);
+    if (!nav) ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+    const bool clicked = ImGui::InvisibleButton(id, size, nav ? ImGuiButtonFlags_EnableNav : ImGuiButtonFlags_None);
+    if (!nav) ImGui::PopItemFlag();
     if (!enabled) ImGui::EndDisabled();
-    focus_if_asked();
-    nav_item();
+    if (nav) {
+        focus_if_asked();
+        nav_item();
+    }
     const ImGuiID item    = ImGui::GetItemID();
     const bool    hovered = enabled && ImGui::IsItemHovered();
-    const bool    focused = ImGui::IsItemFocused();
+    const bool    focused = nav && ImGui::IsItemFocused();
 
     // Cells.
     std::vector<float> xs(static_cast<size_t>(n) + 1);

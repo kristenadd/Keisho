@@ -4876,7 +4876,17 @@ void Gui::draw_picker(Config& config)
         const ImVec2 seg_size = kit.segments_size(systems);
         const ImVec2 seg_at(std::floor(origin.x + (room.x - seg_size.x) * 0.5f),
                             head_top + std::floor((head_h - seg_size.y) * 0.5f));
-        if (kit.segments_at("systems", seg_at, systems, m_picker_system)) {
+        // Tapped or clicked; on a pad LB/RB change it, and the D-pad stays on
+        // the games.
+        int system = m_picker_system;
+        kit.segments_at("systems", seg_at, systems, system, true, false);
+        if (!m_load_error.has_value() && !io.WantTextInput) {
+            const int count = static_cast<int>(systems.size());
+            if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false)) system = (system + count - 1) % count;
+            if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false)) system = (system + 1) % count;
+        }
+        if (system != m_picker_system) {
+            m_picker_system        = system;
             m_picker_scroll_to_sel = true;
         }
     }
@@ -4898,12 +4908,14 @@ void Gui::draw_picker(Config& config)
         std::string hint;
         if (m_touch_ui) {
             // No keyboard: tap to play, or the pad's own buttons.
-            hint = (io.BackendFlags & ImGuiBackendFlags_HasGamepad) ? tr("A: play") : "";
+            hint = (io.BackendFlags & ImGuiBackendFlags_HasGamepad)
+                     ? std::string(tr("A: play")) + "   " + tr("LB/RB: pages")
+                     : "";
         } else {
             hint = trf("Enter: play   %s: settings   %s: quit", hotkey_label(config, Config::Hotkey::Overlay),
                        hotkey_label(config, Config::Hotkey::Quit));
             if (io.BackendFlags & ImGuiBackendFlags_HasGamepad) {
-                hint = std::string(tr("A: play")) + "   " + hint;
+                hint = std::string(tr("A: play")) + "   " + tr("LB/RB: pages") + "   " + hint;
             }
         }
         const float w = ImGui::CalcTextSize(hint.c_str()).x;
