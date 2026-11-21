@@ -764,6 +764,7 @@ void Gui::draw_menu(Config& config, const std::vector<std::string>& gpu_names, I
     // first row of the page and Up to the tabs.
     const ImGuiID window_id = ImGui::GetCurrentWindow()->ID;
     bool          scroll_page_end = false;
+    bool          scroll_page_top = false;
     {
         const int  row   = m_nav.focused_row;
         const int  rows  = static_cast<int>(m_nav.free_rows.size());
@@ -779,17 +780,23 @@ void Gui::draw_menu(Config& config, const std::vector<std::string>& gpu_names, I
             int target = row;
             if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, ImGuiInputFlags_Repeat, window_id)
                 || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown, ImGuiInputFlags_Repeat, window_id)) {
-                target = known ? std::min(row + 1, rows - 1) : std::min(1, rows - 1);
+                // Down from the foot's buttons wraps around to the tabs.
+                target = !known                          ? std::min(1, rows - 1)
+                       : row == m_foot_row && row > 0    ? 0
+                                                         : std::min(row + 1, rows - 1);
             }
             if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, ImGuiInputFlags_Repeat, window_id)
                 || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadUp, ImGuiInputFlags_Repeat, window_id)) {
-                target = known ? std::max(row - 1, 0) : 0;
+                // Up from the tabs wraps around to the foot's buttons.
+                target = !known ? 0 : row == 0 && m_foot_row > 0 ? m_foot_row : std::max(row - 1, 0);
             }
             if (target != row && target >= 0) {
                 m_nav.target_row = target;
                 // Up from the foot's buttons: the page's last row, with the
                 // page scrolled to its end.
                 scroll_page_end = row == m_foot_row && target == m_foot_row - 1;
+                // Down from them wraps to the tabs, with the page at its top.
+                scroll_page_top = row == m_foot_row && target == 0;
             }
         }
         m_nav.rows.clear();
@@ -891,6 +898,9 @@ void Gui::draw_menu(Config& config, const std::vector<std::string>& gpu_names, I
     ImGui::Dummy(ImVec2(0.0f, kit.px(12.0f)));
     if (scroll_page_end) {
         ImGui::SetScrollHereY(1.0f);
+    }
+    if (scroll_page_top) {
+        ImGui::SetScrollY(0.0f);
     }
     ImGui::EndChild();
     ImGui::PopID();
