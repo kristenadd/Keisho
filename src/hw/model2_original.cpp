@@ -33,6 +33,7 @@
 #include <string>
 #include <unordered_map>
 #include <bit>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1740,6 +1741,8 @@ void Model2Original::set_draw_distance(bool extended)
         }
     }
     m_draw_distance = extended;
+    m_cell_dir_x    = 0.0f;
+    m_cell_dir_y    = 0.0f;
     const u32 address = extended ? kWideCellList : kDaytonaCellList;
     std::memcpy(const_cast<u8*>(m_rom_maincpu.data()) + m_track_draw + 4, &address, 4);
     if (extended) {
@@ -1772,7 +1775,8 @@ void Model2Original::extend_track_cells()
     const int cy = (centre >> 4) & 15;
 
     // The game keeps only the cells in front of the camera; their offsets point
-    // the way it faces.
+    // the way it faces. That estimate jumps as cells come and go, so it is
+    // smoothed, and the previous heading stands in when the list gives none.
     bool present[256] = {};
     int  dir_x = 0;
     int  dir_y = 0;
@@ -1782,17 +1786,38 @@ void Model2Original::extend_track_cells()
         dir_x += (cell & 15) - cx;
         dir_y += (cell >> 4) - cy;
     }
-    if (dir_x == 0 && dir_y == 0) {
+    if (dir_x != 0 || dir_y != 0) {
+        const float length = std::sqrt(static_cast<float>(dir_x * dir_x + dir_y * dir_y));
+        const float nx = static_cast<float>(dir_x) / length;
+        const float ny = static_cast<float>(dir_y) / length;
+        // A camera cut swings the heading at once; follow it rather than ease.
+        if ((m_cell_dir_x == 0.0f && m_cell_dir_y == 0.0f)
+            || nx * m_cell_dir_x + ny * m_cell_dir_y < 0.5f) {
+            m_cell_dir_x = nx;
+            m_cell_dir_y = ny;
+        } else {
+            m_cell_dir_x += (nx - m_cell_dir_x) * 0.25f;
+            m_cell_dir_y += (ny - m_cell_dir_y) * 0.25f;
+        }
+    }
+    const float heading = std::sqrt(m_cell_dir_x * m_cell_dir_x + m_cell_dir_y * m_cell_dir_y);
+    if (heading < 1e-3f) {
         return;
     }
+    const float fx = m_cell_dir_x / heading;
+    const float fy = m_cell_dir_y / heading;
 
+    // Every cell ahead of a line a cell and a half behind the camera, the near
+    // ring included, so cells at the edge of view stay put as the camera turns.
+    // Off-screen polygons are dropped by the hardware anyway.
     u32 visible[8];
     std::memcpy(visible, m_work_ram.data() + (kDaytonaVisibleCells - kWorkRam), sizeof(visible));
     u32 total = count;
-    for (int ring = 3; ring <= 15; ++ring) {
+    for (int ring = 0; ring <= 15; ++ring) {
         for (int dy = -ring; dy <= ring; ++dy) {
             for (int dx = -ring; dx <= ring; ++dx) {
-                if (std::max(std::abs(dx), std::abs(dy)) != ring || dx * dir_x + dy * dir_y < 0) {
+                if (std::max(std::abs(dx), std::abs(dy)) != ring
+                    || static_cast<float>(dx) * fx + static_cast<float>(dy) * fy < -1.5f) {
                     continue;
                 }
                 const int x = cx + dx;

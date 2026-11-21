@@ -272,6 +272,9 @@ private:
     SkyPanorama m_sky;
     bool m_draw_distance = false;
     u32  m_track_draw    = 0;
+    /// The camera's heading over the track grid, smoothed across frames.
+    float m_cell_dir_x   = 0.0f;
+    float m_cell_dir_y   = 0.0f;
     enum class Notify : u8 { None, Palette, TileRam, CharRam };
 
     struct Window {
