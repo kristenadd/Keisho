@@ -80,6 +80,7 @@ if(SM2_BUILD_VULKAN)
         render/vk/model3_pass.cpp
         render/vk/poly3d_pass.cpp
         render/vk/present_pass.cpp
+        render/vk/stereo_out.cpp
         render/vk/tilemap_pass.cpp
         render/vk/vk_common.cpp
         render/vk/vma_impl.cpp
@@ -398,8 +399,8 @@ add_library(sm2_osd STATIC
 )
 # The system folder picker: the Files app's on iOS; elsewhere the overlay's own.
 if(SM2_PLATFORM_IOS)
-    target_sources(sm2_osd PRIVATE osd/folder_picker_ios.mm)
-    set_source_files_properties(osd/folder_picker_ios.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_sources(sm2_osd PRIVATE osd/folder_picker_ios.mm osd/launch_splash.mm)
+    set_source_files_properties(osd/folder_picker_ios.mm osd/launch_splash.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(sm2_osd PRIVATE "-framework UIKit" "-framework UniformTypeIdentifiers")
 else()
     target_sources(sm2_osd PRIVATE osd/folder_picker_none.cpp)
@@ -476,6 +477,35 @@ add_executable(keisho
     main.cpp
 )
 
+# Apple Vision Pro: the window's shape and the stereo layer. The Swift is a
+# library of its own, away from the C++ targets' preprocessor definitions,
+# which swiftc cannot take. clang links the app; the Swift objects name the
+# runtime libraries they need, which are found in the SDK and the toolchain.
+if(SM2_PLATFORM_VISIONOS)
+    add_library(sm2_vision_swift STATIC osd/vision_stereo.swift)
+    set_target_properties(sm2_vision_swift PROPERTIES Swift_LANGUAGE_VERSION 6)
+    target_link_libraries(keisho PRIVATE sm2_vision_swift)
+    target_sources(keisho PRIVATE osd/vision_window.mm
+                                  "${CMAKE_SOURCE_DIR}/data/visionos/StereoMaterial.usda")
+    set_source_files_properties(osd/vision_window.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    set_source_files_properties("${CMAKE_SOURCE_DIR}/data/visionos/StereoMaterial.usda"
+                                PROPERTIES MACOSX_PACKAGE_LOCATION "")
+    target_link_libraries(keisho PRIVATE "-framework RealityKit" "-framework SwiftUI" "-framework Metal")
+    if(SM2_IOS_SIMULATOR)
+        set(sm2_swift_platform "xrsimulator")
+    else()
+        set(sm2_swift_platform "xros")
+    endif()
+    execute_process(COMMAND xcrun --find swiftc OUTPUT_VARIABLE sm2_swiftc OUTPUT_STRIP_TRAILING_WHITESPACE)
+    get_filename_component(sm2_toolchain "${sm2_swiftc}" DIRECTORY)
+    get_filename_component(sm2_toolchain "${sm2_toolchain}" DIRECTORY)
+    execute_process(COMMAND xcrun --sdk ${sm2_swift_platform} --show-sdk-path
+                    OUTPUT_VARIABLE sm2_sdk OUTPUT_STRIP_TRAILING_WHITESPACE)
+    set_target_properties(keisho PROPERTIES LINKER_LANGUAGE CXX)
+    target_link_options(keisho PRIVATE "-L${sm2_sdk}/usr/lib/swift"
+                                       "-L${sm2_toolchain}/lib/swift/${sm2_swift_platform}")
+endif()
+
 # On macOS build a .app bundle so Finder and the Dock show the icon.
 if(SM2_PLATFORM_MACOS)
     set(SM2_MACOS_ICNS "${CMAKE_SOURCE_DIR}/data/icons/keisho.icns")
@@ -512,14 +542,23 @@ elseif(SM2_PLATFORM_IOS)
     # executable (staged below), which GameDatabase::locate and i18n look in.
     # Ninja builds it for the Simulator; the Xcode generator also signs it for
     # a device (set SM2_IOS_TEAM to your Apple developer team id).
-    if(SM2_IOS_SIMULATOR)
+    if(SM2_PLATFORM_VISIONOS AND SM2_IOS_SIMULATOR)
+        set(SM2_IOS_PLATFORM "XRSimulator")
+    elseif(SM2_PLATFORM_VISIONOS)
+        set(SM2_IOS_PLATFORM "XROS")
+    elseif(SM2_IOS_SIMULATOR)
         set(SM2_IOS_PLATFORM "iPhoneSimulator")
     else()
         set(SM2_IOS_PLATFORM "iPhoneOS")
     endif()
     set(SM2_IOS_BUNDLE_ID "io.github.keisho-emu.keisho" CACHE STRING "iOS bundle identifier")
     set(SM2_IOS_TEAM "" CACHE STRING "Apple developer team id for device signing (Xcode generator)")
-    configure_file("${CMAKE_SOURCE_DIR}/cmake/Info-iOS.plist.in"
+    if(SM2_PLATFORM_VISIONOS)
+        set(sm2_plist_src "${CMAKE_SOURCE_DIR}/cmake/Info-visionOS.plist.in")
+    else()
+        set(sm2_plist_src "${CMAKE_SOURCE_DIR}/cmake/Info-iOS.plist.in")
+    endif()
+    configure_file("${sm2_plist_src}"
                    "${CMAKE_BINARY_DIR}/Info-iOS.plist.in" @ONLY)
     # @ONLY kept the MACOSX_BUNDLE_* names for CMake's own pass; expand ours now.
     file(READ "${CMAKE_BINARY_DIR}/Info-iOS.plist.in" sm2_plist)
@@ -535,17 +574,26 @@ elseif(SM2_PLATFORM_IOS)
         MACOSX_BUNDLE_BUNDLE_VERSION        "${PROJECT_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING  "${PROJECT_VERSION}"
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${SM2_IOS_BUNDLE_ID}"
-        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY    "1,2"
-        XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}"
         XCODE_ATTRIBUTE_ENABLE_BITCODE            "NO")
+    if(SM2_PLATFORM_VISIONOS)
+        set_target_properties(keisho PROPERTIES
+            XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "7"
+            XCODE_ATTRIBUTE_XROS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    else()
+        set_target_properties(keisho PROPERTIES
+            XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY    "1,2"
+            XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif()
     if(SM2_IOS_TEAM)
         set_target_properties(keisho PROPERTIES
             XCODE_ATTRIBUTE_DEVELOPMENT_TEAM   "${SM2_IOS_TEAM}"
             XCODE_ATTRIBUTE_CODE_SIGN_STYLE    "Automatic"
             XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Apple Development")
     endif()
-    # Home-screen icons, scaled from the 512px PNG at configure time.
-    set(sm2_icon_src "${CMAKE_SOURCE_DIR}/data/icons/keisho-512.png")
+    # Home-screen icons, scaled at configure time from a full-bleed square
+    # (the round artwork over its own navy, so iOS's mask shows no black
+    # corners). Vision Pro instead has a layered icon in an asset catalog, below.
+    set(sm2_icon_src "${CMAKE_SOURCE_DIR}/data/icons/keisho-ios.png")
     set(sm2_icon_dir "${CMAKE_BINARY_DIR}/ios-icons")
     file(MAKE_DIRECTORY "${sm2_icon_dir}")
     set(SM2_IOS_ICONS)
@@ -555,7 +603,7 @@ elseif(SM2_PLATFORM_IOS)
         list(GET spec 0 sm2_icon_name)
         list(GET spec 1 sm2_icon_px)
         set(sm2_icon_out "${sm2_icon_dir}/${sm2_icon_name}")
-        if(NOT EXISTS "${sm2_icon_out}")
+        if(NOT EXISTS "${sm2_icon_out}" OR "${sm2_icon_src}" IS_NEWER_THAN "${sm2_icon_out}")
             execute_process(COMMAND sips -z ${sm2_icon_px} ${sm2_icon_px}
                                     "${sm2_icon_src}" --out "${sm2_icon_out}"
                             OUTPUT_QUIET ERROR_QUIET)
@@ -617,11 +665,50 @@ if(NOT SM2_PLATFORM_MACOS)
     )
 endif()
 if(SM2_PLATFORM_IOS)
-    foreach(icon IN LISTS SM2_IOS_ICONS)
+    # Asset catalogs: the launch screen's gradient and logo on every device,
+    # and on Vision Pro its layered icon too, a navy back and the artwork in
+    # front, which the system moves apart in depth. The launch storyboard lays
+    # out the launch picture (osd/launch_splash.mm repeats it in the app).
+    # Xcode compiles both itself; for Ninja, actool and ibtool do, before the
+    # bundle is signed.
+    set(sm2_assets "${CMAKE_SOURCE_DIR}/data/launch/Launch.xcassets")
+    set(sm2_storyboard "${CMAKE_SOURCE_DIR}/data/launch/LaunchScreen.storyboard")
+    if(SM2_PLATFORM_VISIONOS)
+        list(APPEND sm2_assets "${CMAKE_SOURCE_DIR}/data/visionos/Assets.xcassets")
+        set(sm2_actool_platform $<IF:$<BOOL:${SM2_IOS_SIMULATOR}>,xrsimulator,xros>)
+        set(sm2_devices --target-device vision)
+        set(sm2_app_icon --app-icon AppIcon)
+    else()
+        set(sm2_actool_platform $<IF:$<BOOL:${SM2_IOS_SIMULATOR}>,iphonesimulator,iphoneos>)
+        set(sm2_devices --target-device iphone --target-device ipad)
+        set(sm2_app_icon)
+        foreach(icon IN LISTS SM2_IOS_ICONS)
+            add_custom_command(TARGET keisho POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${icon}" "$<TARGET_FILE_DIR:keisho>/"
+                VERBATIM)
+        endforeach()
+    endif()
+    if(CMAKE_GENERATOR STREQUAL "Xcode")
+        target_sources(keisho PRIVATE ${sm2_assets} "${sm2_storyboard}")
+        set_source_files_properties(${sm2_assets} "${sm2_storyboard}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+        if(SM2_PLATFORM_VISIONOS)
+            set_target_properties(keisho PROPERTIES XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon")
+        endif()
+    else()
         add_custom_command(TARGET keisho POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${icon}" "$<TARGET_FILE_DIR:keisho>/"
+            COMMAND xcrun actool ${sm2_assets} --compile "$<TARGET_BUNDLE_DIR:keisho>"
+                    --platform ${sm2_actool_platform}
+                    --minimum-deployment-target ${CMAKE_OSX_DEPLOYMENT_TARGET} ${sm2_devices}
+                    ${sm2_app_icon}
+                    --output-partial-info-plist "${CMAKE_BINARY_DIR}/assets-partial.plist"
+                    --output-format human-readable-text --notices --warnings
+            COMMAND xcrun ibtool --compile "$<TARGET_BUNDLE_DIR:keisho>/LaunchScreen.storyboardc"
+                    "${sm2_storyboard}" ${sm2_devices}
+                    --minimum-deployment-target ${CMAKE_OSX_DEPLOYMENT_TARGET}
+                    --output-format human-readable-text --errors --warnings
+            COMMENT "Compiling the icon and launch screen"
             VERBATIM)
-    endforeach()
+    endif()
     # Ninja leaves the bundle unsigned; the Simulator accepts an ad hoc
     # signature. Xcode signs on its own.
     if(NOT CMAKE_GENERATOR STREQUAL "Xcode")

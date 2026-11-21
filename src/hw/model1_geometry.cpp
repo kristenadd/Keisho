@@ -432,10 +432,13 @@ void Model1Geometry::emit_screen(const Quad& q, const Point* points, u32 count, 
         if (poly.scissor[2] < poly.scissor[0]) poly.scissor[2] = poly.scissor[0];
         if (poly.scissor[3] < poly.scissor[1]) poly.scissor[3] = poly.scissor[1];
     };
+    // The view depth goes along although nothing here is textured: a stereo
+    // display's second eye is shifted by it (render/backend.h StereoOptions).
+    // Screen-space quads have none, and stay on the screen plane at 1.
     const auto vertex = [&](RenderPolygon& poly, u32 slot, const Point& p) {
         poly.v[slot].x    = p.sx + wide;
         poly.v[slot].y    = p.sy;
-        poly.v[slot].p[0] = 1.0F;
+        poly.v[slot].p[0] = !q.direct && p.z > 0.0F ? p.z : 1.0F;
     };
 
     // Two distinct corners is a wireframe edge; give it one native pixel of width.

@@ -80,6 +80,13 @@ layout(push_constant) uniform R3DModel {
     float modelScale;
     float nodeAlpha;
     uint  b_translatorMap;
+#ifndef SM2_TARGET_GL
+    // The right eye of a stereo pair (render/backend.h StereoOptions): NDC
+    // shift per unit of view depth, and the view depth of the screen plane.
+    // Zero for the ordinary frame.
+    float stereoSeparation;
+    float stereoConvergence;
+#endif
 };
 
 #define translatorMap bool(b_translatorMap)
@@ -132,6 +139,14 @@ void main(void)
     fsFixedShade  = inFixedShade;
     fsLODBase     = fsDiscardPoly * -cota * inTextureNP;
     gl_Position   = (projMat * modelMat) * inVertex;
+#ifndef SM2_TARGET_GL
+    // Linear in the vertex, so this is an exact second camera: polygons that
+    // reach behind the eye clip as they should. So geometry nearer than the
+    // screen plane does come out of the window: a cap would bend those
+    // polygons, and putting the plane at the near clip plane leaves no depth,
+    // as the games' near planes sit almost at the eye.
+    gl_Position.x += stereoSeparation * (gl_Position.w - stereoConvergence);
+#endif
 #ifdef SM2_TARGET_GL
     gl_Position.y = -gl_Position.y;
 #endif

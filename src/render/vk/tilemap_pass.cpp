@@ -60,6 +60,8 @@ struct PushConstants {
     u32   mode;
     u32   upscale;        ///< 0 faithful, 1 xBR, 2 ScaleFX
     float source_size[2];
+    float backdrop;        ///< stereo: the backdrop is marked (tilemap_composite.frag)
+    float backdrop_shift;  ///< stereo right eye: the backdrop's shift, fraction of the width
 };
 
 /// mode values understood by the fragment shader.
@@ -729,10 +731,12 @@ void TilemapPass::compute(const hw::Model2MachineBase& machine, const hw::Model2
         m_panorama_generation = machine.tile_generation();
     }
     m_sky = m_columns != 0 ? machine.sky_panorama() : nullptr;
-    if (!tile_changed && !char_changed && !table_changed && target.composed_wide == m_wide_below) {
+    // Bit 27: mark the backdrop for a stereo display's second eye.
+    const u32 wide_below = m_wide_below | (m_mark_backdrop ? 1u << 27 : 0u);
+    if (!tile_changed && !char_changed && !table_changed && target.composed_wide == wide_below) {
         return;
     }
-    target.composed_wide = m_wide_below;
+    target.composed_wide = wide_below;
 
     if (tile_changed) {
         const std::span<const u8> tile_ram = machine.tile_ram();
@@ -803,7 +807,7 @@ void TilemapPass::dispatch_compose()
                           VK_ACCESS_2_SHADER_STORAGE_READ_BIT
                               | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 
-    ComputePush push{width(), m_columns, m_wide_below, m_panorama_state.cacheable,
+    ComputePush push{width(), m_columns, target.composed_wide, m_panorama_state.cacheable,
                      {}, {}, {}, {}, {}, {}, {}};
     std::copy(m_hud_bands.begin(), m_hud_bands.end(), push.hud);
     if (m_sky != nullptr) {
@@ -875,7 +879,8 @@ void TilemapPass::transition_for_sampling(const Surface& target)
 void TilemapPass::record_below(VkImageView                      target,
                                u32                              background_rgba,
                                const VkRenderingAttachmentInfo* stencil,
-                               bool                             stencil_depth)
+                               bool                             stencil_depth,
+                               float                            backdrop_shift)
 {
     const VkCommandBuffer cmd = m_context->cmd();
 
@@ -918,6 +923,8 @@ void TilemapPass::record_below(VkImageView                      target,
     push.background[2] = static_cast<float>((background_rgba >> 16) & 0xff) / 255.0F;
     push.background[3] = 1.0F;
     push.mode          = kModeResolveOverBackground;
+    push.backdrop       = m_mark_backdrop ? 1.0F : 0.0F;
+    push.backdrop_shift = backdrop_shift;
     push.upscale       = m_upscale_2d;
     push.source_size[0] = static_cast<float>(width());
     push.source_size[1] = static_cast<float>(kSourceHeight);

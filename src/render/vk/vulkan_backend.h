@@ -23,6 +23,7 @@
 #include "render/vk/model3_pass.h"
 #include "render/vk/poly3d_pass.h"
 #include "render/vk/present_pass.h"
+#include "render/vk/stereo_out.h"
 #include "render/vk/tilemap_pass.h"
 
 #include <unordered_map>
@@ -119,7 +120,18 @@ public:
         return m_model3.line_of_sight().latest();
     }
 
+    [[nodiscard]] bool supports_stereo() const override { return StereoOut::available(m_context); }
+    void set_stereo(const StereoOptions& options) override { m_stereo = options; }
+    [[nodiscard]] StereoFrame finished_stereo_frame() const override
+    {
+        return m_stereo_active ? m_stereo_out.finished() : StereoFrame{};
+    }
+
 private:
+    /// Create or resize the right eye's frame and the side-by-side output for
+    /// m_stereo, or report that stereo cannot run. At begin_frame().
+    [[nodiscard]] bool ensure_stereo();
+
     /// The shader texture-quality value for the current enhancement options,
     /// clamped to the device's anisotropy limit. 0 = faithful single-tap.
     [[nodiscard]] u32 effective_texture_quality() const;
@@ -142,6 +154,17 @@ private:
     Poly3DPass   m_polygons;
     PresentPass  m_present;
     FrameCapture m_capture;
+
+    // Stereo (Apple Vision Pro): the right eye's native frame, drawn beside
+    // m_present's, and both copied side by side for Metal.
+    StereoOptions m_stereo;
+    bool          m_stereo_active = false;  ///< this frame draws a right eye
+    bool          m_stereo_failed = false;  ///< could not set up; stop trying
+    bool          m_right_drawn   = false;  ///< the right eye was drawn this frame
+    PresentPass   m_present_right;
+    bool          m_present_right_ready = false;
+    StereoOut     m_stereo_out;
+    VkImageView   m_right_view = VK_NULL_HANDLE;
 
     /// The view begin_frame() returned this frame, for the tilemap/3D calls
     /// that draw into it.

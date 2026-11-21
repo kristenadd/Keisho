@@ -106,6 +106,9 @@ public:
     /// Index into the per-frame resource rings, in [0, kFramesInFlight).
     [[nodiscard]] u32 frame_index() const { return m_frame_index; }
 
+    /// Whether VK_EXT_metal_objects is enabled (MoltenVK).
+    [[nodiscard]] bool metal_objects() const { return m_metal_objects; }
+
     [[nodiscard]] VkImage     swapchain_image() const { return m_swapchain_images[m_image_index]; }
     [[nodiscard]] VkImageView swapchain_view()  const { return m_swapchain_views[m_image_index]; }
     [[nodiscard]] VkFormat    swapchain_format() const { return m_swapchain_format; }
@@ -197,6 +200,7 @@ private:
     bool m_vsync            = true;
     bool m_needs_recreation = false;
     bool m_portability       = false;
+    bool m_metal_objects     = false;
 
     // -- GPU stage timing ----------------------------------------------------
     // Two queries per stage (begin, end), one set per frame in flight. A zero

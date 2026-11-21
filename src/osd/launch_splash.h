@@ -1,0 +1,47 @@
+// ██╗  ██╗███████╗██╗███████╗██╗  ██╗ ██████╗
+// ██║ ██╔╝██╔════╝██║██╔════╝██║  ██║██╔═══██╗
+// █████╔╝ █████╗  ██║███████╗███████║██║   ██║
+// ██╔═██╗ ██╔══╝  ██║╚════██║██╔══██║██║   ██║
+// ██║  ██╗███████╗██║███████║██║  ██║╚██████╔╝
+// ╚═╝  ╚═╝╚══════╝╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝
+//            継 承  ( k e i s h ō )
+//
+// A Sega Model 1, 2 & 3 arcade emulator.
+// Copyright (c) 2025+ Daniel Martin (dmanlfc)
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This header must not be removed. Keisho is licensed under the GNU General
+// Public License, version 3 or later, with additional terms under section 7 of
+// that licence. See LICENSE and NOTICE.
+//
+// iPhone, iPad and Apple Vision Pro: the launch screen's picture (the Vision
+// Pro icon's gradient and logo, data/launch/) held over the window from its
+// creation until the first frame is drawn, so starting the renderer and
+// reading the game list show no black. On iOS it carries on from the system's
+// launch screen; visionOS has no launch screen of its own. No-ops elsewhere.
+#pragma once
+
+#if defined(__APPLE__)
+#  include <TargetConditionals.h>
+#endif
+
+struct SDL_Window;
+
+namespace sm2::osd {
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+
+/// Cover `window` with the launch picture.
+void show_launch_splash(SDL_Window* window);
+
+/// Fade the launch picture out. Safe to call more than once.
+void hide_launch_splash();
+
+#else
+
+inline void show_launch_splash(SDL_Window*) {}
+inline void hide_launch_splash() {}
+
+#endif
+
+}  // namespace sm2::osd

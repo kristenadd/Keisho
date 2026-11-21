@@ -70,6 +70,9 @@ public:
     /// but only for a menu panel (a row-scroll layer's foreground tile).
     void set_wide_below(u32 mode) { m_wide_below = mode; }
     void set_hud_bands(const std::array<u32, 4>& bands) { m_hud_bands = bands; }
+    /// Stereo: tell the backdrop behind the 3D (pair B) from the text there
+    /// (pair A), so record_below() can move only the backdrop. GPU compose only.
+    void set_mark_backdrop(bool mark) { m_mark_backdrop = mark; }
     void shutdown();
 
     /// Refresh this frame's copies of tile RAM, character RAM and the pen table
@@ -103,10 +106,14 @@ public:
     /// scope's depth/stencil for the 3D pass's fill mask; `stencil_depth` says
     /// whether that format also carries a depth aspect. Null leaves the scope
     /// colour-only (render test mode, no 3D).
+    ///
+    /// `backdrop_shift`, with set_mark_backdrop() on, moves the backdrop right
+    /// by that fraction of the width: the right eye of a stereo pair.
     void record_below(VkImageView                      target,
                       u32                              background_rgba,
                       const VkRenderingAttachmentInfo* stencil,
-                      bool                             stencil_depth);
+                      bool                             stencil_depth,
+                      float                            backdrop_shift = 0.0F);
 
     /// Draw the above layers over whatever is in the frame, and end rendering.
     void record_above();
@@ -213,6 +220,7 @@ private:
 
     u32  m_columns    = 0;
     u32  m_wide_below = 0;
+    bool m_mark_backdrop = false;
     std::array<u32, 4> m_hud_bands{};
 
     /// Widescreen side columns for the layers behind the 3D; see PanoramaTracker.

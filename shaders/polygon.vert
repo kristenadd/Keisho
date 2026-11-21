@@ -46,6 +46,13 @@ layout(push_constant) uniform Push {
     // polygon.frag but part of the shared layout.
     uint renderScale;
     uint textureQuality;
+#ifndef SM2_TARGET_GL
+    // The right eye of a stereo pair (render/backend.h StereoOptions): NDC
+    // shift per unit of view depth, and the view depth of the screen plane.
+    // Zero for the ordinary frame.
+    float stereoSeparation;
+    float stereoConvergence;
+#endif
 } pc;
 
 void main()
@@ -63,6 +70,13 @@ void main()
     order = order * 2.0 - 1.0;
 #endif
     gl_Position = vec4(ndc * w, order * w, w);
+#ifndef SM2_TARGET_GL
+    // Nothing comes out in front of the screen plane: Model 1 and 2 draw menu
+    // frames and other overlays as polygons just in front of the eye, which
+    // belong with the 2D text on the screen. polygon.frag shifts the vertex
+    // ring it textures from the same way (stereoShift()).
+    gl_Position.x += pc.stereoSeparation * max(w - pc.stereoConvergence, 0.0);
+#endif
     vTexel      = inTexel;
     vPolygon    = inPolygon;
 }

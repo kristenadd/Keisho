@@ -69,7 +69,27 @@ layout(push_constant) uniform Push {
     vec2 invRaster;
     uint renderScale;    ///< N, 1 at native
     uint textureQuality; ///< 0 = faithful single-tap; else anisotropic tap ceiling
+#ifndef SM2_TARGET_GL
+    float stereoSeparation;  ///< the right eye's shift; see polygon.vert
+    float stereoConvergence;
+#endif
 } pc;
+
+/// The right eye's shift of a ring vertex at reciprocal depth `oneOverZ`, in
+/// native pixels: polygon.vert's clip-space shift, divided by w and scaled from
+/// NDC to the raster. Zero for the ordinary frame.
+float stereoShift(float oneOverZ)
+{
+#ifdef SM2_TARGET_GL
+    return 0.0;
+#else
+    if (pc.stereoSeparation == 0.0) {
+        return 0.0;
+    }
+    const float w = 1.0 / max(oneOverZ, 1.0e-30);
+    return pc.stereoSeparation * max(1.0 - pc.stereoConvergence / w, 0.0) * 0.5 / pc.invRaster.x;
+#endif
+}
 
 // ---------------------------------------------------------------------------
 // Machine memory
@@ -502,7 +522,8 @@ vec3 polygonInterpolate(uint idx, float fx, float fy)
             continue;
         }
         const float t   = clamp((fy - y1) / (y2 - y1), 0.0, 1.0);
-        const float x   = mix(GEOM(idx).x[i], GEOM(idx).x[j], t);
+        const float x   = mix(GEOM(idx).x[i] + stereoShift(GEOM(idx).oneOverZ[i]),
+                              GEOM(idx).x[j] + stereoShift(GEOM(idx).oneOverZ[j]), t);
         const vec3  ppp = vec3(mix(GEOM(idx).uOverZ[i],   GEOM(idx).uOverZ[j],   t),
                                mix(GEOM(idx).vOverZ[i],   GEOM(idx).vOverZ[j],   t),
                                mix(GEOM(idx).oneOverZ[i], GEOM(idx).oneOverZ[j], t));

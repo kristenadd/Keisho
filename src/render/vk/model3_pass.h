@@ -58,7 +58,14 @@ public:
 
     // The buffer writes run on the frame's worker while the commands are
     // recorded: wait(take_upload_ticket()) on it before submitting.
-    void record(model3::FrameBuilder& frame, VkImage native_image, VkImageView native_view);
+    //
+    // `right_view`, when not null, also receives the right eye of a stereo
+    // pair, if set_stereo() had it on when this frame's 3D was prepared.
+    void record(model3::FrameBuilder& frame, VkImage native_image, VkImageView native_view,
+                VkImageView right_view = VK_NULL_HANDLE);
+    /// The right eye's shift, for the 3D prepared from now on. Not while a
+    /// prepare_next() may be running.
+    void set_stereo(const StereoOptions& stereo) { m_stereo = stereo; }
     /// On the frame's worker, after a build: the 3D pass for the next
     /// record(), which otherwise records it itself.
     void prepare_next(model3::FrameBuilder& frame);
@@ -98,6 +105,8 @@ private:
         VkDescriptorSet fog_set = VK_NULL_HANDLE;
         u64             bound_uniforms = 0;  ///< serial of the buffer the sets point at
         VkCommandBuffer cmd = VK_NULL_HANDLE;  ///< secondary
+        VkCommandBuffer cmd_right = VK_NULL_HANDLE;  ///< secondary: the right eye's 3D
+        bool            has_right = false;           ///< cmd_right was recorded with this build
         u64             build      = 0;  ///< FrameBuilder::build_serial() recorded, 0 for none
         u64             sets_epoch = 0;
         bool            has_3d     = false;
@@ -133,9 +142,12 @@ private:
     void read_back_los(BuildSlot& f);
     void upload(model3::FrameBuilder& frame, PerFrame& f, VkCommandBuffer cmd);
     [[nodiscard]] bool prepare_3d(model3::FrameBuilder& frame, BuildSlot& f, bool on_worker);
-    void draw_3d(const model3::FramePlan& plan, BuildSlot& f, VkCommandBuffer cmd);
+    /// `right_eye` draws the stereo pair's right eye, without the
+    /// line-of-sight readback, which stays the ordinary frame's.
+    void draw_3d(const model3::FramePlan& plan, BuildSlot& f, VkCommandBuffer cmd,
+                 const StereoOptions* right_eye = nullptr);
     void draw_range(const model3::FramePlan& plan, model3::DrawRange range, int layer, BuildSlot& f,
-                    VkCommandBuffer cmd, bool float_depth);
+                    VkCommandBuffer cmd, bool float_depth, const StereoOptions* right_eye);
     void composite(const model3::FramePlan& plan, VkImageView native_view, VkCommandBuffer cmd);
 
     Context* m_context      = nullptr;
@@ -143,6 +155,7 @@ private:
     bool     m_ready        = false;
     bool     m_smooth_2d    = false;
     u32      m_aniso_taps   = 1;
+    StereoOptions m_stereo;
     u32      m_render_scale = 1;
     u32      m_width        = 0;
     u32      m_height       = 0;

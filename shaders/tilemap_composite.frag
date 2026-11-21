@@ -48,7 +48,20 @@ layout(push_constant) uniform Push {
     // 0 plain, 1 xBR, 2 ScaleFX; modes 0 and 1 only.
     uint upscale;
     vec2 source_size;
+#ifndef SM2_TARGET_GL
+    // Stereo (Apple Vision Pro): 1 when the compute pass marked the backdrop
+    // (alpha 254, tilemap_compose.comp markBackdrop()), and how far right, as
+    // a fraction of the width, the right eye moves it: to infinity, where the
+    // farthest 3D is. Text and its shadows behind the 3D stay put.
+    float backdrop;
+    float backdrop_shift;
+#endif
 } pc;
+
+bool isBackdrop(vec4 texel)
+{
+    return abs(texel.a * 255.0 - 254.0) < 0.5;
+}
 
 // Edge-directed pixel-art upscaling of the 2D tilemap layer.
 //
@@ -123,12 +136,31 @@ vec4 edgeSample(vec2 uv, uint kind)
 
 void main()
 {
+    vec2 uv = vTexCoord;
+#ifndef SM2_TARGET_GL
+    if (pc.mode == 0u && pc.backdrop != 0.0 && pc.backdrop_shift != 0.0) {
+        // Text and shadows stay; elsewhere the backdrop from farther left
+        // shows, or, where text hides it, the backdrop that was here.
+        vec4 here = texture(uLayer, uv);
+        if (here.a == 0.0 || isBackdrop(here)) {
+            vec2 from = uv - vec2(pc.backdrop_shift, 0.0);
+            if (isBackdrop(texture(uLayer, from))) {
+                uv = from;
+            }
+        }
+    }
+#endif
     vec4 layer;
     if (pc.upscale != 0u && pc.mode != 2u) {
-        layer = edgeSample(vTexCoord, pc.upscale);
+        layer = edgeSample(uv, pc.upscale);
     } else {
-        layer = texture(uLayer, vTexCoord);
+        layer = texture(uLayer, uv);
     }
+#ifndef SM2_TARGET_GL
+    if (pc.backdrop != 0.0 && isBackdrop(layer)) {
+        layer.a = 1.0;
+    }
+#endif
 
     if (pc.mode == 0u) {
         fragColour = vec4(pc.background.rgb * (1.0 - layer.a) + layer.rgb, 1.0);

@@ -163,6 +163,14 @@ struct Config {
     /// Bezel artwork in fullscreen.
     bool bezel = false;
 
+    /// Apple Vision Pro: a right-eye view of the 3D beside the picture, shown
+    /// as stereo in the window, the scene behind the window's surface (Model 3's
+    /// nearest geometry comes out a little; render/backend.h). Depth
+    /// is the separation of far objects, 0..100 (100 is 5% of the picture's
+    /// width). The 2D layers stay on the surface. Live-switchable.
+    bool stereo_3d    = false;
+    u32  stereo_depth = 40;
+
     /// Enhancements beyond the original hardware, GPU-gated. anisotropy is the
     /// 2..16 tap ceiling, clamped to the GPU maximum.
     TextureFilter texture_filter = TextureFilter::Faithful;

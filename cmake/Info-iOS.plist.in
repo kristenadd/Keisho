@@ -62,9 +62,11 @@
             </array>
         </dict>
     </dict>
-    <!-- An empty launch screen gives the app the whole display at its native size. -->
-    <key>UILaunchScreen</key>
-    <dict/>
+    <!-- The launch screen: the Vision Pro icon's gradient and logo
+         (data/launch/LaunchScreen.storyboard). A launch storyboard also gives
+         the app the whole display at its native size. -->
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
     <key>UIRequiresFullScreen</key>
     <true/>
     <key>UIStatusBarHidden</key>

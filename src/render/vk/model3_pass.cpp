@@ -383,6 +383,7 @@ bool Model3Pass::create_resources()
         info.level              = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
         info.commandBufferCount = 1;
         SM2_VK_TRY(vkAllocateCommandBuffers(m_context->device(), &info, &s.cmd));
+        SM2_VK_TRY(vkAllocateCommandBuffers(m_context->device(), &info, &s.cmd_right));
     }
 
     VkSamplerCreateInfo sampler{};
@@ -1085,6 +1086,20 @@ bool Model3Pass::prepare_3d(FrameBuilder& frame, BuildSlot& f, bool on_worker)
     if (vkEndCommandBuffer(f.cmd) != VK_SUCCESS) {
         return false;
     }
+    // The stereo pair's right eye: the same 3D again, each vertex shifted by
+    // its depth, into the same targets once the left eye's composite has read
+    // them (record()).
+    f.has_right = false;
+    if (f.has_3d && m_stereo.enabled) {
+        if (vkBeginCommandBuffer(f.cmd_right, &begin) != VK_SUCCESS) {
+            return false;
+        }
+        draw_3d(plan, f, f.cmd_right, &m_stereo);
+        if (vkEndCommandBuffer(f.cmd_right) != VK_SUCCESS) {
+            return false;
+        }
+        f.has_right = true;
+    }
     f.frame_number = frame.frame_number();
     f.sets_epoch   = m_sets_epoch;
     f.build        = frame.build_serial();
@@ -1100,7 +1115,7 @@ void Model3Pass::prepare_next(FrameBuilder& frame)
 }
 
 void Model3Pass::draw_range(const FramePlan& plan, DrawRange range, int layer, BuildSlot& f, VkCommandBuffer cmd,
-                            bool float_depth)
+                            bool float_depth, const StereoOptions* right_eye)
 {
     const VkDeviceSize r3d_stride = round_up(sizeof(R3DUniforms), m_ubo_alignment);
 
@@ -1138,8 +1153,15 @@ void Model3Pass::draw_range(const FramePlan& plan, DrawRange range, int layer, B
             bound_uniforms = d.uniforms;
         }
         if (d.model != bound_model) {
-            vkCmdPushConstants(cmd, m_r3d_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(R3DModelUniforms),
-                               &plan.models[d.model]);
+            if (right_eye != nullptr) {
+                R3DModelUniforms eye   = plan.models[d.model];
+                eye.stereoSeparation  = 2.0f * right_eye->separation;
+                eye.stereoConvergence = right_eye->convergence;
+                vkCmdPushConstants(cmd, m_r3d_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(R3DModelUniforms), &eye);
+            } else {
+                vkCmdPushConstants(cmd, m_r3d_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(R3DModelUniforms),
+                                   &plan.models[d.model]);
+            }
             bound_model = d.model;
         }
         const int ref = d.layered || !d.no_los_return ? 0x00 : 0x80;
@@ -1158,7 +1180,7 @@ void Model3Pass::draw_range(const FramePlan& plan, DrawRange range, int layer, B
     }
 }
 
-void Model3Pass::draw_3d(const FramePlan& plan, BuildSlot& f, VkCommandBuffer cmd)
+void Model3Pass::draw_3d(const FramePlan& plan, BuildSlot& f, VkCommandBuffer cmd, const StereoOptions* right_eye)
 {
     const auto& fn = device_functions();
     const VkRect2D whole{{0, 0}, {m_target_width, m_target_height}};
@@ -1291,12 +1313,12 @@ void Model3Pass::draw_3d(const FramePlan& plan, BuildSlot& f, VkCommandBuffer cm
                 draw_fogs(m_layer_fog_pipelines[fd ? 1 : 0]);
                 first = false;
             }
-            draw_range(plan, pass.colour, 0, f, cmd, fd);
+            draw_range(plan, pass.colour, 0, f, cmd, fd, right_eye);
             fn.cmd_end_rendering(cmd);
             attachments_written();
         }
 
-        if (pass.los) {
+        if (pass.los && right_eye == nullptr) {
             // Line of sight: copy the texel now, decode when this slot retires.
             record_image_barrier(cmd, m_los_target.image, VK_IMAGE_ASPECT_COLOR_BIT,
                                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -1364,7 +1386,7 @@ void Model3Pass::draw_3d(const FramePlan& plan, BuildSlot& f, VkCommandBuffer cm
             info.pDepthAttachment     = &depth;
             info.pStencilAttachment   = fd ? nullptr : &depth;
             fn.cmd_begin_rendering(cmd, &info);
-            draw_range(plan, range, layer, f, cmd, fd);
+            draw_range(plan, range, layer, f, cmd, fd, right_eye);
             fn.cmd_end_rendering(cmd);
             attachments_written();
         };
@@ -1465,7 +1487,7 @@ void Model3Pass::composite(const FramePlan& plan, VkImageView native_view, VkCom
     fn.cmd_end_rendering(cmd);
 }
 
-void Model3Pass::record(FrameBuilder& frame, VkImage native_image, VkImageView native_view)
+void Model3Pass::record(FrameBuilder& frame, VkImage native_image, VkImageView native_view, VkImageView right_view)
 {
     static_cast<void>(native_image);
     if (!m_ready || !frame.has_frame()) {
@@ -1509,6 +1531,15 @@ void Model3Pass::record(FrameBuilder& frame, VkImage native_image, VkImageView n
     m_context->write_timestamp(VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, GpuStage::Composite, false);
     composite(plan, native_view, cmd);
     m_context->write_timestamp(VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, GpuStage::Composite, true);
+    if (right_view != VK_NULL_HANDLE) {
+        // The right eye redraws the 3D targets the composite above sampled
+        // (its first barriers wait on that), or, without a right-eye 3D,
+        // composites the same targets again.
+        if (s.has_right) {
+            vkCmdExecuteCommands(cmd, 1, &s.cmd_right);
+        }
+        composite(plan, right_view, cmd);
+    }
 }
 
 }  // namespace sm2::render::vk

@@ -1102,6 +1102,27 @@ void Gui::page_display(ui::Kit& kit, Config& config, const std::vector<std::stri
     }
     kit.end_group();
 
+#if defined(__APPLE__) && TARGET_OS_VISION
+    kit.begin_group(tr("Stereo 3D"));
+    kit.tip(tr("Draws the 3D a second time for the right eye, so the scene has depth behind the window. "
+               "The 2D layers and text stay on the window's surface. The menus are shown flat."));
+    kit.toggle(tr("Stereo 3D"), tr("Depth for the 3D scene, per eye."), config.stereo_3d);
+    if (config.stereo_3d) {
+        const auto pct = [&](const char* name, const char* tip, u32& value) {
+            int  v = static_cast<int>(value);
+            char shown[16];
+            std::snprintf(shown, sizeof shown, "%d%%", v);
+            kit.tip(tip);
+            if (kit.slider(name, nullptr, v, 0, 100, 5, shown)) {
+                value = static_cast<u32>(v);
+            }
+        };
+        pct(tr("Depth"), tr("How far apart the eyes' views of distant objects are. Lower it if the picture "
+                            "is hard to fuse."), config.stereo_depth);
+    }
+    kit.end_group();
+#endif
+
     kit.begin_group(tr("Enhancements beyond the original hardware"));
     {
         static constexpr std::array<const char*, 2> kTex = {N_("Faithful"), N_("Anisotropic")};

@@ -339,6 +339,75 @@ Without a debugger attached, iOS keeps the app from mapping executable memory,
 which is why the interpreter is always used there. Running from Xcode does not
 change that: the build never asks for the JIT.
 
+## Apple Vision Pro
+
+The visionOS build is the iOS port with a different window and optional stereo
+3D. Everything in the iOS section applies (interpreter only, Vulkan through
+MoltenVK, a game controller, ROMs in the app's Documents folder), with these
+differences:
+
+- **A floating window.** Keisho runs as one window in the Shared Space. The
+  window keeps the picture's shape: choose *4:3* or *16:9* (or *Square pixels*)
+  in *Settings > Picture > Aspect*, and the window changes shape to match
+  while keeping its size. Dragging the corner then resizes it in that shape
+  only. *Stretch* lets the window take any shape.
+- **Stereo 3D** (*Settings > Stereo 3D*, off by default). The 3D is drawn a
+  second time for the right eye, with each vertex shifted by its view depth, so
+  the scene has real depth behind the window. Nothing comes out of it in Model 1
+  and 2 games; in Model 3 games, geometry right in front of the camera (the
+  nearest road) comes out a little, as limiting it bends those polygons. The 2D
+  layers (HUD, text) stay on the window's surface, except a Model 1 or 2 game's
+  scrolling backdrop behind the 3D (the sky, distant hills), which sits at
+  infinity behind the scene. *Depth* sets how far apart the eyes' views of
+  distant objects are. The left eye is the ordinary frame, so captures and gun
+  line-of-sight are unchanged. Both eyes are shown by a RealityKit plane over
+  the window (`osd/vision_stereo.swift`, `data/visionos/StereoMaterial.usda`),
+  which takes a side-by-side frame from Vulkan through `VK_EXT_metal_objects`.
+  The menus are drawn flat: the stereo layer hides while they are open. The
+  stereo picture is shown two to three frames later than the flat one, and it
+  costs a second 3D pass per frame. The software renderer has no right eye and
+  shows the same picture to both eyes.
+- **visionOS 26.5 or newer**, because MoltenVK 1.4.2's visionOS slices are
+  built for it.
+- **Swift** is enabled for this build only, for the RealityKit layer.
+
+### Prerequisites
+
+As for iOS, but the MoltenVK xcframework must also contain the visionOS
+slices that `MoltenVK-all.tar` ships:
+
+```
+3rdparty/ios/MoltenVK/MoltenVK/static/MoltenVK.xcframework/xros-arm64/libMoltenVK.a
+3rdparty/ios/MoltenVK/MoltenVK/static/MoltenVK.xcframework/xros-arm64_x86_64-simulator/libMoltenVK.a
+```
+
+The visionOS platform and its Simulator runtime must be installed in Xcode.
+
+### Simulator
+
+```sh
+cmake -S . -B build-visionos-sim -G Ninja -DCMAKE_SYSTEM_NAME=visionOS \
+    -DCMAKE_OSX_SYSROOT=xrsimulator -DCMAKE_OSX_ARCHITECTURES=arm64 \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build build-visionos-sim
+xcrun simctl install booted build-visionos-sim/bin/Keisho.app
+xcrun simctl launch --console-pty booted io.github.keisho-emu.keisho
+```
+
+The Simulator draws one view, the left eye, so stereo shows there as an
+ordinary picture.
+
+### Device
+
+```sh
+cmake -S . -B build-visionos -G Xcode -DCMAKE_SYSTEM_NAME=visionOS \
+    -DSM2_IOS_TEAM=<your team id> \
+    -DSM2_IOS_BUNDLE_ID=com.example.keisho
+open build-visionos/keisho.xcodeproj
+```
+
+Then pick the `keisho` scheme and your Vision Pro, and Run, as for iOS.
+
 ## Windows
 
 Windows builds with **MSVC** (Visual Studio 2022's toolchain) and Ninja. SDL3

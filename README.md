@@ -25,6 +25,12 @@ other Linux distributions. macOS is supported because I partly develop on it,
 and it runs Vulkan through MoltenVK. I don't care for Windows... there, I said
 it, but there is a port for the unfortunate :-)
 
+**iOS (iPhone and iPad) and visionOS (Apple Vision Pro)** are supported too,
+built from the same tree. On Vision Pro, Keisho is a floating window that keeps
+the picture's 4:3 or 16:9 shape, with optional **stereoscopic 3D**: the 3D is
+rendered a second time for the right eye, so the scene has real depth behind
+the window. See [Apple devices](#apple-devices).
+
 I used some GenAI along the way, but over 90% of the code is hand-written or
 reused. Giving GenAI small, focused tasks sped up my part-time work from
 November 2025 onwards, first with how the components fit together and later
@@ -113,6 +119,8 @@ choice there, and the only one that widens 2D backgrounds in 16:9.
 | **x86-64 Linux** | The main target. Any modern desktop or laptop runs every set at full speed on any renderer. |
 | **x86-64 Windows** | Built with MSVC, with the software, OpenGL and Vulkan renderers. Less tested than Linux. |
 | **macOS** | Apple Silicon (recommended) or a 2015+ Intel Mac. The release dmg includes MoltenVK and needs nothing else installed. |
+| **iOS (iPhone, iPad)** | iOS 16 or newer. No JIT is allowed, so Model 3 runs on the PowerPC interpreter; A17 Pro, M-series and newer chips are in the 2-3.6x-real-time range per core. A game controller is required. |
+| **visionOS (Apple Vision Pro)** | visionOS 26.5 or newer. As iOS, plus a resizable window and optional stereoscopic 3D. |
 | **ARM (SBCs, handhelds)** | A **Raspberry Pi 5** or better. The Pi 5 runs most Model 1 and 2 games at full speed; the heaviest Model 2B/2C games run just below it. Model 3 games run below full speed on a Pi 5, mostly at 42-56 fps at 1080p. |
 
 On a Raspberry Pi 5 with the software renderer, Virtua Fighter 2, Daytona USA,
@@ -154,7 +162,8 @@ finished screen-space triangles.
 ## Building
 
 See [BUILDING.md](BUILDING.md) for dependencies, CMake options, the three
-graphics backends, per-distro packages, macOS and cross-compiling for ARM.
+graphics backends, per-distro packages, macOS, iOS, visionOS and
+cross-compiling for ARM.
 
 A default Linux build (software + OpenGL):
 
@@ -376,6 +385,31 @@ Set in the **Video** tab and applied live:
   bezels folder (Paths tab), named after the set (`daytona.png`), its parent,
   or `default.png`. The image needs a transparent window in the middle; a
   1440x1080 window in a 1920x1080 image keeps the game where it is.
+
+### Apple devices
+
+On **iPhone and iPad** Keisho runs full screen on Vulkan (MoltenVK). A game
+controller plays the games (MFi, Xbox, PlayStation or Switch); touch runs the
+menus, and tapping the screen during a game opens the settings. ROMs go in the
+Files app under *On My iPhone* (or *iPad*) *> Keisho*, or any folder picked in
+*Settings > Paths*.
+
+On **Apple Vision Pro** Keisho is one window in the Shared Space. It takes the
+shape of the **Aspect** setting, 4:3 or 16:9, and keeps it as you resize it from
+the corner. **Stereo 3D** (off by default) gives the 3D real depth:
+
+- The 3D is drawn a second time for the right eye, each vertex shifted by its
+  distance from the camera, so near and far objects sit at their own depths
+  behind the window. This works for Model 1, 2 and 3.
+- The HUD and text stay on the window's surface; a Model 1 or 2 game's
+  scrolling backdrop (the sky, distant hills) sits at infinity behind the scene.
+  Screens with almost no 3D, such as menus and title cards, are shown flat.
+- **Depth** sets how strong the effect is. Nothing comes out of the window in
+  Model 1 and 2 games; in Model 3 games the geometry right in front of the
+  camera comes out a little.
+- The left eye is the ordinary picture, so screenshots and light-gun aim are
+  unchanged. The settings menu is shown flat. Stereo costs a second 3D pass per
+  frame and shows the picture two to three frames later.
 
 ### Enhancements
 

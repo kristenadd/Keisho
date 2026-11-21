@@ -48,6 +48,8 @@ struct PolygonPush {
     float inv_raster[2];
     u32   render_scale;
     u32   texture_quality;  ///< 0 = faithful; else anisotropic tap ceiling
+    float stereo_separation;   ///< right eye only (render/backend.h StereoOptions)
+    float stereo_convergence;
 };
 
 /// Bytes of luminance RAM, which is one tone curve per 128 entries.
@@ -1108,14 +1110,17 @@ VkRenderingAttachmentInfo Poly3DPass::stencil_attachment() const
     return stencil;
 }
 
-void Poly3DPass::draw_polygons()
+void Poly3DPass::draw_polygons(const StereoOptions* right_eye)
 {
     const VkCommandBuffer cmd    = m_context->cmd();
     Frame&                target = frame();
 
     // Runs inside TilemapPass's native-frame scope, between record_below() and
-    // record_above(), blending the 3D straight onto the below-tilemap.
-    m_context->write_timestamp(VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, GpuStage::Poly3D, false);
+    // record_above(), blending the 3D straight onto the below-tilemap. The
+    // right eye's repeat is not timed: its queries were written already.
+    if (right_eye == nullptr) {
+        m_context->write_timestamp(VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, GpuStage::Poly3D, false);
+    }
 
     if (m_vertex_count != 0) {
         PolygonPush push{};
@@ -1123,6 +1128,10 @@ void Poly3DPass::draw_polygons()
         push.inv_raster[1]    = 1.0F / static_cast<float>(kHeight);
         push.render_scale     = m_render_scale;
         push.texture_quality  = m_texture_quality;
+        if (right_eye != nullptr) {
+            push.stereo_separation  = 2.0F * right_eye->separation;
+            push.stereo_convergence = right_eye->convergence;
+        }
 
         const VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(cmd, 0, 1, &target.vertices.handle, &offset);
@@ -1165,7 +1174,9 @@ void Poly3DPass::draw_polygons()
         }
     }
 
-    m_context->write_timestamp(VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, GpuStage::Poly3D, true);
+    if (right_eye == nullptr) {
+        m_context->write_timestamp(VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, GpuStage::Poly3D, true);
+    }
 }
 
 }  // namespace sm2::render::vk

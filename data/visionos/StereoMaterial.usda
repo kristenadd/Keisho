@@ -1,0 +1,74 @@
+#usda 1.0
+(
+    defaultPrim = "Root"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+# Keisho's stereo picture on Apple Vision Pro (src/osd/vision_stereo.swift).
+# StereoTexture holds both eyes side by side, left eye in the left half; each
+# eye samples its own half, and anything that renders one view (a capture, the
+# Simulator) sees the left eye. Unlit and not tone mapped, so the arcade's
+# colours reach the display as they are.
+
+def Xform "Root"
+{
+    def Material "StereoMaterial"
+    {
+        asset inputs:StereoTexture
+        token outputs:mtlx:surface.connect = </Root/StereoMaterial/Surface.outputs:out>
+        token outputs:realitykit:vertex
+
+        def Shader "Surface"
+        {
+            uniform token info:id = "ND_realitykit_unlit_surfaceshader"
+            bool inputs:applyPostProcessToneMap = 0
+            bool inputs:hasPremultipliedAlpha = 0
+            color3f inputs:color.connect = </Root/StereoMaterial/Image.outputs:out>
+            float inputs:opacity = 1
+            token outputs:out
+        }
+
+        def Shader "UV"
+        {
+            uniform token info:id = "ND_texcoord_vector2"
+            float2 outputs:out
+        }
+
+        def Shader "LeftUV"
+        {
+            uniform token info:id = "ND_multiply_vector2"
+            float2 inputs:in1.connect = </Root/StereoMaterial/UV.outputs:out>
+            float2 inputs:in2 = (0.5, 1)
+            float2 outputs:out
+        }
+
+        def Shader "RightUV"
+        {
+            uniform token info:id = "ND_add_vector2"
+            float2 inputs:in1.connect = </Root/StereoMaterial/LeftUV.outputs:out>
+            float2 inputs:in2 = (0.5, 0)
+            float2 outputs:out
+        }
+
+        def Shader "EyeUV"
+        {
+            uniform token info:id = "ND_realitykit_geometry_switch_cameraindex_vector2"
+            float2 inputs:mono.connect = </Root/StereoMaterial/LeftUV.outputs:out>
+            float2 inputs:left.connect = </Root/StereoMaterial/LeftUV.outputs:out>
+            float2 inputs:right.connect = </Root/StereoMaterial/RightUV.outputs:out>
+            float2 outputs:out
+        }
+
+        def Shader "Image"
+        {
+            uniform token info:id = "ND_image_color3"
+            asset inputs:file.connect = </Root/StereoMaterial.inputs:StereoTexture>
+            string inputs:filtertype = "linear"
+            string inputs:uaddressmode = "clamp"
+            string inputs:vaddressmode = "clamp"
+            float2 inputs:texcoord.connect = </Root/StereoMaterial/EyeUV.outputs:out>
+            color3f outputs:out
+        }
+    }
+}

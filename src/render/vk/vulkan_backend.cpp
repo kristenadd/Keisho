@@ -150,6 +150,9 @@ void VulkanBackend::shutdown()
     m_model3.shutdown();
     m_model3_width = 0;
     m_capture.shutdown();
+    m_stereo_out.shutdown();
+    m_present_right.shutdown();
+    m_present_right_ready = false;
     m_present.shutdown();
     m_polygons.shutdown();
     m_tilemaps.shutdown();
@@ -181,6 +184,9 @@ bool VulkanBackend::begin_frame()
         // The 2D surfaces and the native frame are sized by the width.
         m_context.wait_idle();
         m_present.shutdown();
+        m_present_right.shutdown();
+        m_present_right_ready = false;
+        m_stereo_out.shutdown();
         m_tilemaps.shutdown();
         m_columns = m_pending_columns;
         if (!m_tilemaps.init(m_context, m_render_scale, m_columns)
@@ -198,7 +204,36 @@ bool VulkanBackend::begin_frame()
     // begin_frame() fenced the reused slot, so anything retired long enough ago
     // is now unreferenced.
     reclaim_retired_textures();
-    m_native_view = m_present.begin_frame();
+    m_native_view   = m_present.begin_frame();
+    m_stereo_active = ensure_stereo();
+    m_tilemaps.set_mark_backdrop(m_stereo_active);
+    m_right_drawn   = false;
+    m_right_view    = m_stereo_active ? m_present_right.begin_frame() : VK_NULL_HANDLE;
+    return true;
+}
+
+bool VulkanBackend::ensure_stereo()
+{
+    if (!m_stereo.enabled || m_stereo_failed) {
+        return false;
+    }
+    if (!m_present_right_ready) {
+        if (!m_present_right.init(m_context, m_render_scale, frame_width(m_columns))) {
+            SM2_WARN("stereo: could not create the right eye's frame; stereo is off");
+            m_stereo_failed = true;
+            return false;
+        }
+        m_present_right_ready = true;
+    }
+    const VkExtent2D eye = m_present.composite_extent();
+    if (!m_stereo_out.ready() || m_stereo_out.eye_width() != eye.width
+        || m_stereo_out.eye_height() != eye.height) {
+        if (!m_stereo_out.init(m_context, eye.width, eye.height)) {
+            SM2_WARN("stereo: this GPU cannot share images with Metal; stereo is off");
+            m_stereo_failed = true;
+            return false;
+        }
+    }
     return true;
 }
 
@@ -240,6 +275,41 @@ void VulkanBackend::composite_native_frame(u32 background_rgba, bool skip_3d)
         m_polygons.draw_polygons();
     }
     m_tilemaps.record_above();
+
+    if (m_stereo_active) {
+        // The right eye: the same layers, the 3D shifted by depth. Its fill
+        // mask is cleared again on load, after the left eye's tests.
+        VkMemoryBarrier2 mb{};
+        mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+        mb.srcStageMask  = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+        mb.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        mb.dstStageMask  = mb.srcStageMask;
+        mb.dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        VkDependencyInfo dep{};
+        dep.sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        dep.memoryBarrierCount = 1;
+        dep.pMemoryBarriers    = &mb;
+        device_functions().cmd_pipeline_barrier2(m_context.cmd(), &dep);
+
+        // The backdrop behind the 3D (sky, distant scenery) goes to infinity,
+        // where the farthest 3D is; the text and shadows there and the layers
+        // in front (HUD) stay on the screen plane. A frame with next to no 3D
+        // is a 2D screen (a menu, a title) whose few polygons are part of its
+        // layout, and whose backdrop layers hold its pictures: both eyes see it
+        // flat, as Virtua Racing's course select needs.
+        constexpr u32 kSceneMinPolygons = 32;
+        StereoOptions eye = m_stereo;
+        if (m_polygons.drawn_polygons() < kSceneMinPolygons) {
+            eye.separation = 0.0F;
+        }
+        m_tilemaps.record_below(m_right_view, background_rgba, &stencil, m_polygons.stencil_has_depth(),
+                                eye.separation);
+        if (!skip_3d) {
+            m_polygons.draw_polygons(&eye);
+        }
+        m_tilemaps.record_above();
+        m_right_drawn = true;
+    }
 }
 
 void VulkanBackend::submit_native_frame(std::span<const u32> pixels)
@@ -267,6 +337,8 @@ void VulkanBackend::submit_model3_frame(const hw::model3::VideoFrame& frame)
     if (!ensure_model3()) {
         return;
     }
+    // Before the build: the worker may prepare the 3D with it.
+    m_model3.set_stereo(m_stereo.enabled && !m_stereo_failed ? m_stereo : StereoOptions{});
     m_model3_frame.set_geometry(model3_geometry());
     if (m_model3_async) {
         m_model3_frame.submit_async(frame, m_model3.encode_depth());
@@ -283,7 +355,9 @@ void VulkanBackend::render_model3()
         return;
     }
     m_model3_frame.match_geometry(model3_geometry(), m_model3.encode_depth());
-    m_model3.record(m_model3_frame, m_present.native_image(), m_native_view);
+    m_model3.set_stereo(m_stereo.enabled && !m_stereo_failed ? m_stereo : StereoOptions{});
+    m_model3.record(m_model3_frame, m_present.native_image(), m_native_view, m_right_view);
+    m_right_drawn = m_stereo_active;
 }
 
 bool VulkanBackend::request_capture()
@@ -308,6 +382,12 @@ void VulkanBackend::blit_to_swapchain()
                          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    if (m_stereo_active) {
+        // A frame without a right eye (the software renderer) shows the left
+        // to both eyes.
+        m_stereo_out.record(m_present.native_image(),
+                            m_right_drawn ? m_present_right.native_image() : m_present.native_image());
+    }
     m_present.record();
 }
 

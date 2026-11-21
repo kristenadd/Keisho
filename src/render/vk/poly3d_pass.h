@@ -110,7 +110,8 @@ public:
     /// Draw what build() prepared into the native frame, inside the tilemap
     /// pass's scope between record_below() and record_above(), with
     /// stencil_attachment() attached. Premultiplied over the below-tilemap.
-    void draw_polygons();
+    /// `right_eye` draws the right eye of a stereo pair instead of the frame.
+    void draw_polygons(const StereoOptions* right_eye = nullptr);
 
     // -- diagnostics -------------------------------------------------------
 

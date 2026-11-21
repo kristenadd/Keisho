@@ -55,10 +55,15 @@ if(SM2_BUILD_VULKAN AND SM2_PLATFORM_IOS)
     # 3rdparty/ios/ (not committed; BUILDING.md says where to get it).
     set(SM2_MOLTENVK_DIR "${SM2_3RDPARTY}/ios/MoltenVK/MoltenVK" CACHE PATH
         "MoltenVK release folder holding include/ and static/MoltenVK.xcframework")
-    if(SM2_IOS_SIMULATOR)
-        set(sm2_mvk_slice "ios-arm64_x86_64-simulator")
+    if(SM2_PLATFORM_VISIONOS)
+        set(sm2_mvk_os "xros")
     else()
-        set(sm2_mvk_slice "ios-arm64")
+        set(sm2_mvk_os "ios")
+    endif()
+    if(SM2_IOS_SIMULATOR)
+        set(sm2_mvk_slice "${sm2_mvk_os}-arm64_x86_64-simulator")
+    else()
+        set(sm2_mvk_slice "${sm2_mvk_os}-arm64")
     endif()
     set(sm2_mvk_lib "${SM2_MOLTENVK_DIR}/static/MoltenVK.xcframework/${sm2_mvk_slice}/libMoltenVK.a")
     if(NOT EXISTS "${sm2_mvk_lib}")
@@ -484,7 +489,7 @@ include(ExternalProject)
 # own Makefiles, with Xcode's per-SDK variables cleared and the macOS SDK named.
 set(sm2_host_generator)
 if(SM2_PLATFORM_IOS)
-    set(sm2_host_env ${CMAKE_COMMAND} -E env --unset=SDKROOT --unset=IPHONEOS_DEPLOYMENT_TARGET
+    set(sm2_host_env ${CMAKE_COMMAND} -E env --unset=SDKROOT --unset=IPHONEOS_DEPLOYMENT_TARGET --unset=XROS_DEPLOYMENT_TARGET
                      --unset=PLATFORM_NAME --unset=EFFECTIVE_PLATFORM_NAME)
     set(sm2_host_generator
         CMAKE_GENERATOR "Unix Makefiles"

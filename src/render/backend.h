@@ -183,6 +183,39 @@ struct PresentOptions {
     float gain = 1.0f;
 };
 
+/// A second, right-eye render of the 3D for a stereo display (Apple Vision
+/// Pro). The left eye is the ordinary frame, unchanged, so the mono picture,
+/// captures and line-of-sight results never move. The right eye shifts each
+/// vertex across by its view depth w, in clip space:
+///
+///     x += 2 * separation * (w - screen plane)
+///
+/// so points at w == convergence sit on the screen plane and farther ones go
+/// behind it, up to `separation` of the picture's width at infinity. Model 1
+/// and 2 arrive already clipped, so they hold anything nearer on the plane,
+/// where their menu frames, drawn as polygons just in front of the eye, belong
+/// with the 2D text. Model 3 keeps the shift linear, an exact second camera,
+/// as polygons reaching behind the eye need, so geometry nearer than the plane
+/// comes out of the window a little. The 2D layers stay on the screen plane,
+/// except Model 1/2's backdrop behind the 3D (the sky, distant scenery: pair
+/// B of the tilemaps), which goes to infinity with the farthest 3D.
+struct StereoOptions {
+    bool  enabled     = false;
+    float separation  = 0.0F;  ///< fraction of the picture's width
+    float convergence = 1.0F;  ///< view depth of the screen plane, in the game's units
+
+    bool operator==(const StereoOptions&) const = default;
+};
+
+/// One finished side-by-side stereo frame: left eye in the left half.
+struct StereoFrame {
+    /// The platform's GPU texture (an id<MTLTexture> on Apple), or null when
+    /// no stereo frame has completed yet.
+    void* texture = nullptr;
+    u32   width   = 0;  ///< both halves
+    u32   height  = 0;
+};
+
 /// Graphics enhancement settings, defaulting to faithful. Gated against
 /// Capabilities at the point of use.
 struct EnhancementOptions {
@@ -381,6 +414,18 @@ public:
     /// Line-of-sight results of the latest completed frame (frame_number 0 =
     /// none yet). Any thread. Vulkan lags up to kFramesInFlight frames.
     [[nodiscard]] virtual model3::LineOfSight model3_line_of_sight() const { return {}; }
+
+    // -- stereo (Apple Vision Pro) --------------------------------------------
+
+    /// Whether set_stereo() can render a right eye.
+    [[nodiscard]] virtual bool supports_stereo() const { return false; }
+
+    /// Adopt new stereo options before the next frame.
+    virtual void set_stereo(const StereoOptions& options) { static_cast<void>(options); }
+
+    /// The newest stereo frame the GPU has finished, after begin_frame(). It
+    /// stays intact until the next begin_frame(): copy it out before then.
+    [[nodiscard]] virtual StereoFrame finished_stereo_frame() const { return {}; }
 
     // -- GPU stage timing ----------------------------------------------------
 

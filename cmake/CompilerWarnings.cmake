@@ -86,10 +86,11 @@ else()
 endif()
 
 add_library(sm2_warnings INTERFACE)
-target_compile_options(sm2_warnings INTERFACE ${SM2_WARNING_FLAGS})
+# C-family only: Apple Vision Pro's keisho target also compiles Swift.
+target_compile_options(sm2_warnings INTERFACE $<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:${SM2_WARNING_FLAGS}>)
 
 add_library(sm2_warnings_ported INTERFACE)
 target_compile_options(sm2_warnings_ported INTERFACE
-    ${SM2_WARNING_FLAGS}
-    ${SM2_WARNING_RELAXATIONS}
+    $<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:${SM2_WARNING_FLAGS}>
+    $<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:${SM2_WARNING_RELAXATIONS}>
 )

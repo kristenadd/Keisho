@@ -40,6 +40,21 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(APPLE)
     enable_language(OBJCXX)
 endif()
+# Swift for Apple Vision Pro's stereo layer, whose RealityKit APIs have no
+# Objective-C form (src/osd/vision_stereo.swift).
+if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
+    # CMake does not derive swiftc's target from the visionOS sysroot.
+    set(sm2_xros_min "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    if(NOT sm2_xros_min)
+        set(sm2_xros_min "26.5")
+    endif()
+    if(CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
+        set(CMAKE_Swift_COMPILER_TARGET "arm64-apple-xros${sm2_xros_min}-simulator")
+    else()
+        set(CMAKE_Swift_COMPILER_TARGET "arm64-apple-xros${sm2_xros_min}")
+    endif()
+    enable_language(Swift)
+endif()
 
 # Apple's ld warns on every static library CMake repeats for link order.
 if(APPLE)
@@ -108,16 +123,28 @@ set_property(CACHE SM2_EVDEV PROPERTY STRINGS AUTO ON OFF)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(SM2_PLATFORM_LINUX TRUE)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "visionOS")
     # iPhone and iPad. Vulkan through a statically linked MoltenVK is the only
     # renderer that can present (iOS's OpenGL ES stops at 3.0), and there is no
     # JIT: the PowerPC runs on its interpreter. See BUILDING.md.
+    #
+    # Apple Vision Pro shares all of that, and the UIKit code with it, so it is
+    # SM2_PLATFORM_IOS too; SM2_PLATFORM_VISIONOS adds its window and stereo.
     set(SM2_PLATFORM_IOS TRUE)
+    if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
+        set(SM2_PLATFORM_VISIONOS TRUE)
+    endif()
     set(SM2_BUILD_VULKAN         ON  CACHE BOOL "Build the Vulkan backend" FORCE)
     set(SM2_BUILD_OPENGL_DESKTOP OFF CACHE BOOL "Build the OpenGL 4.3 core desktop backend" FORCE)
     set(SM2_BUILD_OPENGL_ES      OFF CACHE BOOL "Build the OpenGL ES 3.1 backend (ARM)" FORCE)
     if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
-        set(CMAKE_OSX_DEPLOYMENT_TARGET "16.0" CACHE STRING "Minimum iOS version" FORCE)
+        if(SM2_PLATFORM_VISIONOS)
+            # MoltenVK 1.4.2's visionOS slices are built for 26.5. (RealityKit's
+            # LowLevelTexture, which carries the stereo frame, needs only 2.0.)
+            set(CMAKE_OSX_DEPLOYMENT_TARGET "26.5" CACHE STRING "Minimum visionOS version" FORCE)
+        else()
+            set(CMAKE_OSX_DEPLOYMENT_TARGET "16.0" CACHE STRING "Minimum iOS version" FORCE)
+        endif()
     endif()
     # Simulator or device decides which MoltenVK slice is linked.
     if(CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
@@ -180,7 +207,7 @@ message(STATUS "")
 message(STATUS "Keisho ${PROJECT_VERSION}")
 message(STATUS "  system          : ${CMAKE_SYSTEM_NAME} / ${CMAKE_SYSTEM_PROCESSOR}")
 if(SM2_PLATFORM_IOS)
-    message(STATUS "  iOS target      : ${CMAKE_OSX_DEPLOYMENT_TARGET}, simulator=${SM2_IOS_SIMULATOR}")
+    message(STATUS "  ${CMAKE_SYSTEM_NAME} target  : ${CMAKE_OSX_DEPLOYMENT_TARGET}, simulator=${SM2_IOS_SIMULATOR}")
 endif()
 message(STATUS "  build type      : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  compiler        : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")

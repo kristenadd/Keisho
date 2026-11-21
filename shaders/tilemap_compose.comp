@@ -76,7 +76,8 @@ layout(push_constant) uniform Push {
     // leaving black where only a mirror would do (2), or only where that
     // mirror is of a menu panel, a row-scroll layer's foreground tile (3).
     // The layers in front are the HUD and stay on the 4:3 screen. Bits 28-31
-    // are the layers whose HUD spreads to the edges, by `hud`.
+    // are the layers whose HUD spreads to the edges, by `hud`. Bit 27 marks
+    // the backdrop (markBackdrop()).
     uint wideBelow;
     // Per layer (see render::PanoramaTracker): whether the panorama applies,
     // the world column of the screen's left edge, and the live epoch.
@@ -452,6 +453,16 @@ uint mirrorOf(int sx)
 // Composite
 // ---------------------------------------------------------------------------
 
+/// With wideBelow bit 27, a pixel behind the 3D that is the backdrop, pair B's
+/// background planes (the sky, distant scenery) rather than pair A (text and
+/// its shadows), is written with alpha 254 for 255. A stereo display's second
+/// eye moves only those back to infinity; TilemapPass's fragment shader reads
+/// 254 as opaque.
+uint markBackdrop(uint colour)
+{
+    return (pc.wideBelow & (1u << 27u)) != 0u && (colour >> 24u) == 0xffu ? colour - (1u << 24u) : colour;
+}
+
 /// The topmost layer wins whatever its category, layer 0 over 1 over 2 over 3,
 /// as compose() mixes them; that pixel's category then puts it in `below` or
 /// `above`. Within a layer a category-one texel beats pair B's opaque draw.
@@ -472,7 +483,7 @@ void compositeLayers(uint dx, uint dy, out uint below, out uint above)
             return;
         }
         if (layer >= 2u || (opaqueTexel && category == 0u)) {
-            below = uPens[pen];
+            below = layer >= 2u ? markBackdrop(uPens[pen]) : uPens[pen];
             return;
         }
     }
@@ -494,7 +505,7 @@ void compositeMasked(uint dx, uint dy, uint mask, out uint below, out uint above
             return;
         }
         if (layer >= 2u || (opaqueTexel && category == 0u)) {
-            below = uPens[pen];
+            below = layer >= 2u ? markBackdrop(uPens[pen]) : uPens[pen];
             return;
         }
     }
@@ -590,6 +601,8 @@ void main()
             below = compositeSide(dx, sx, dy, refused);
             if (refused) {
                 below = kOpaqueBlack;
+            } else {
+                below = markBackdrop(below);  // the side columns are scenery
             }
         }
         uBelow[index] = below;

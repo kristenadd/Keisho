@@ -48,7 +48,9 @@
 #include "osd/gui.h"
 #include "osd/i18n.h"
 #include "osd/input.h"
+#include "osd/launch_splash.h"
 #include "osd/scraper.h"
+#include "osd/vision.h"
 #include "osd/window.h"
 #include "render/backend.h"
 #include "render/model3/soft_backend.h"
@@ -993,6 +995,8 @@ int main(int argc, char** argv)
     options.config.crt_mask_strength     = from_file.crt_mask_strength;
     options.config.crt_glow_strength     = from_file.crt_glow_strength;
     options.config.crt_curvature         = from_file.crt_curvature;
+    options.config.stereo_3d             = from_file.stereo_3d;
+    options.config.stereo_depth          = from_file.stereo_depth;
     options.config.bezel                 = from_file.bezel;
     options.config.bezel_dir             = from_file.bezel_dir;
     options.config.crosshair_dir         = from_file.crosshair_dir;
@@ -1759,6 +1763,8 @@ int main(int argc, char** argv)
                 window.destroy();
                 return false;
             }
+            // iOS/visionOS: the launch picture until the first frame is drawn.
+            osd::show_launch_splash(window.handle());
             if (opengl) {
 #if defined(SM2_HAVE_OPENGL_DESKTOP) || defined(SM2_HAVE_OPENGL_ES)
                 backend = render::create_opengl_backend();
@@ -2813,6 +2819,34 @@ int main(int argc, char** argv)
                 exit_code = 1;
                 break;
             }
+            {
+                // Apple Vision Pro (no-ops elsewhere): the window keeps the
+                // picture's shape, and with stereo on, the finished stereo frame
+                // goes to each eye while a game runs and no menu is up. The
+                // menus stay on the flat window beneath.
+                const AspectMode shown = shown_aspect();
+                const float aspect = shown == AspectMode::FourThree    ? 4.0F / 3.0F
+                                   : shown == AspectMode::Widescreen   ? 16.0F / 9.0F
+                                   : shown == AspectMode::SquarePixel
+                                         ? static_cast<float>(render::kNativeWidth) / render::kNativeHeight
+                                         : 0.0F;
+                osd::vision::set_window_aspect(window.handle(), aspect);
+                const bool stereo_shown = options.config.stereo_3d && machine_any != nullptr
+                                          && !gui.visible() && !gui.picker_active()
+                                          && !gui.load_error_open();
+                render::StereoOptions stereo;
+                stereo.enabled = stereo_shown && backend->supports_stereo();
+                // Depth 100% puts infinity 5% of the picture's width apart. The
+                // screen plane sits a few units from the eye: behind Model 1/2's
+                // menu frames, and in front of nearly all of a scene.
+                stereo.separation  = 0.05F * static_cast<float>(options.config.stereo_depth) / 100.0F;
+                stereo.convergence = 3.0F;
+                backend->set_stereo(stereo);
+                if (begin_ok) {
+                    osd::vision::present_stereo(window.handle(), backend->finished_stereo_frame(),
+                                                stereo.enabled, aspect);
+                }
+            }
             if (!begin_ok) {
                 // Minimised or the swapchain was rebuilt: yield, and abandon the
                 // pacing deadline.
@@ -3151,6 +3185,7 @@ int main(int argc, char** argv)
                 auto scope = core::maybe_scope(stage_submit, profile_sample);
                 end_frame_ok = backend->end_frame();
             }
+            osd::hide_launch_splash();  // a no-op after the first frame
             if (!end_frame_ok) {
                 SM2_ERROR("frame submission failed");
                 exit_code = 1;

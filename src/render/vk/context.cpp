@@ -673,6 +673,12 @@ bool Context::create_device()
         // Must be enabled when advertised (MoltenVK).
         extensions.push_back("VK_KHR_portability_subset");
     }
+    // MoltenVK: hand a VkImage's MTLTexture to Metal, for the Vision Pro's
+    // stereo frame (render/vk/stereo_out.cpp).
+    if (has_extension(available, "VK_EXT_metal_objects")) {
+        extensions.push_back("VK_EXT_metal_objects");
+        m_metal_objects = true;
+    }
 
     const bool core13 = m_api_version >= kRequiredApiVersion;
     if (!core13) {

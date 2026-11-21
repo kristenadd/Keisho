@@ -99,9 +99,14 @@ struct alignas(16) R3DModelUniforms {
     float modelScale;
     float nodeAlpha;
     u32   translatorMap;
-    u32   pad0;
+    /// The right eye's shift (render/backend.h StereoOptions), Vulkan only:
+    /// GL's std140 block stops before them. Zero in the plan; the stereo pass
+    /// sets them on its own copy.
+    float stereoSeparation;
+    float stereoConvergence;
+    u32   pad[3];
 };
-static_assert(sizeof(R3DModelUniforms) == 80);
+static_assert(sizeof(R3DModelUniforms) == 96);
 
 struct alignas(16) ScrollFogUniforms {
     float fogColour[4];      // .rgb colour, .a density

@@ -740,6 +740,16 @@ bool load_config(const std::string& path, Config* out, std::vector<std::string>*
             if (!parse_u32(value, &out->crt_curvature)) {
                 bad_value();
             }
+        } else if (key == "stereo_3d") {
+            if (!parse_bool(value, &out->stereo_3d)) {
+                bad_value();
+            }
+        } else if (key == "stereo_depth") {
+            if (!parse_u32(value, &out->stereo_depth)) {
+                bad_value();
+            }
+        } else if (key == "stereo_convergence") {
+            // Pop-out, since removed: the scene now stays behind the window.
         } else if (key == "bezel") {
             if (!parse_bool(value, &out->bezel)) {
                 bad_value();
@@ -1114,6 +1124,7 @@ bool load_config(const std::string& path, Config* out, std::vector<std::string>*
     out->crt_mask_strength     = std::min(out->crt_mask_strength, 100u);
     out->crt_glow_strength     = std::min(out->crt_glow_strength, 100u);
     out->crt_curvature         = std::min(out->crt_curvature, 100u);
+    out->stereo_depth          = std::min(out->stereo_depth, 100u);
     // The backend further clamps to the device's maxSamplerAnisotropy.
     out->anisotropy            = std::clamp(out->anisotropy, 1u, 16u);
     // A UDP port is 16-bit; floor at 1 since 0 binds an ephemeral port.
@@ -1162,6 +1173,8 @@ bool save_config(const std::string& path, const Config& config)
         << "crt_mask_strength = " << config.crt_mask_strength << "\n"
         << "crt_glow_strength = " << config.crt_glow_strength << "\n"
         << "crt_curvature = " << config.crt_curvature << "\n"
+        << "stereo_3d = " << bool_text(config.stereo_3d) << "\n"
+        << "stereo_depth = " << config.stereo_depth << "\n"
         << "texture_filter = " << texture_filter_name(config.texture_filter) << "\n"
         << "anisotropy = " << config.anisotropy << "\n"
         << "upscale_2d = " << upscale_2d_name(config.upscale_2d) << "\n"
