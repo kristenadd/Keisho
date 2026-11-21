@@ -69,6 +69,7 @@ public:
     void set_enhancement_options(const EnhancementOptions& options) override;
     void set_texture_replacements(TextureReplacements* replacements) override;
     void set_widescreen(u32 columns, u32 wide_background) override;
+    void set_render_scale(u32 scale) override;
     void set_hud_bands(const std::array<u32, 4>& bands) override { m_tilemaps.set_hud_bands(bands); }
     void blit_to_swapchain() override;
     void begin_overlay_frame() override;
@@ -174,6 +175,9 @@ private:
 
     /// Internal 3D render scale (1..kMaxRenderScale); 1 is native.
     u32 m_render_scale = 1;
+    u32 m_pending_render_scale = 1;
+    /// The device's largest 2D image side, which caps the scale.
+    u32 m_max_dimension = 0;
 
     u32 m_columns         = 0;
     u32 m_pending_columns = 0;

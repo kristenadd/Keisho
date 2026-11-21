@@ -59,6 +59,9 @@ public:
 
     /// Raster width to draw at, in native pixels; live.
     void set_width(u32 width) { m_width = width; }
+    /// The pass draws into the present pass's targets, so a new scale needs
+    /// only its scissors and push constants changed.
+    void set_render_scale(u32 scale) { m_render_scale = scale; }
     void shutdown();
 
     /// Anisotropic texture-filter quality (0 = faithful single-tap, else the

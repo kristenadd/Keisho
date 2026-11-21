@@ -1055,8 +1055,8 @@ void Gui::page_display(ui::Kit& kit, Config& config, const std::vector<std::stri
         int scale = std::clamp(static_cast<int>(config.render_scale), 1, 8) - 1;
         kit.tip(tr("Internal 3D rendering resolution, times the native 496x384. Higher is crisper 3D; "
                    "the 2D stays sharp either way. GPU renderers only."));
-        if (kit.choice(tr("3D render scale"), tr("1x is the arcade's own. 8x suits a 4K display."), kScales, scale,
-                       {.badge = next_launch})) {
+        if (kit.choice(tr("3D render scale"), tr("1x is the arcade's own. 8x suits a 4K display."), kScales,
+                       scale)) {
             config.render_scale = static_cast<u32>(scale + 1);
         }
     }

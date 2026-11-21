@@ -113,6 +113,8 @@ bool VulkanBackend::init(osd::Window& window, const BackendConfig& config)
                  scaled_height(m_render_scale), max_dimension, fitted);
         m_render_scale = fitted;
     }
+    m_max_dimension        = max_dimension;
+    m_pending_render_scale = m_render_scale;
     if (m_render_scale != 1) {
         SM2_INFO("render scale %ux: 3D and composite targets at %ux%u",
                  m_render_scale, scaled_width(m_render_scale),
@@ -180,22 +182,38 @@ Capabilities VulkanBackend::capabilities() const
 bool VulkanBackend::begin_frame()
 {
     m_capture_requested = false;
-    if (m_pending_columns != m_columns) {
-        // The 2D surfaces and the native frame are sized by the width.
+    if (m_pending_columns != m_columns || m_pending_render_scale != m_render_scale) {
+        // The 2D surfaces and the native frame are sized by the width, and
+        // with the 3D's targets by the scale.
+        const bool rescale = m_pending_render_scale != m_render_scale;
+        m_model3_frame.wait();
         m_context.wait_idle();
         m_present.shutdown();
         m_present_right.shutdown();
         m_present_right_ready = false;
         m_stereo_out.shutdown();
         m_tilemaps.shutdown();
-        m_columns = m_pending_columns;
+        m_columns      = m_pending_columns;
+        m_render_scale = m_pending_render_scale;
+        if (rescale) {
+            m_polygons.shutdown();
+            if (!m_polygons.init(m_context, m_render_scale)) {
+                SM2_ERROR("could not rebuild the 3D pipeline at %ux", m_render_scale);
+                return false;
+            }
+            m_polygons.set_texture_quality(effective_texture_quality());
+            m_model3_width = 0;  // ensure_model3() rebuilds it at the new scale
+            SM2_INFO("render scale %ux: 3D and composite targets at %ux%u", m_render_scale,
+                     scaled_width(m_render_scale), scaled_height(m_render_scale));
+        }
         if (!m_tilemaps.init(m_context, m_render_scale, m_columns)
             || !m_present.init(m_context, m_render_scale, frame_width(m_columns))) {
-            SM2_ERROR("could not resize the native frame for widescreen");
+            SM2_ERROR("could not resize the native frame");
             return false;
         }
         m_present.set_options(m_present_options);
         m_tilemaps.set_upscale_2d(static_cast<u32>(m_enhancement_options.upscale_2d));
+        m_tilemaps.set_wide_below(m_model3_wide);
         m_polygons.set_width(frame_width(m_columns));
     }
     if (!m_context.begin_frame()) {
@@ -403,6 +421,13 @@ void VulkanBackend::set_widescreen(u32 columns, u32 wide_background)
     m_pending_columns = columns;
     m_model3_wide     = wide_background;
     m_tilemaps.set_wide_below(wide_background);
+}
+
+void VulkanBackend::set_render_scale(u32 scale)
+{
+    const u32 wanted = std::clamp(scale, 1U, kMaxRenderScale);
+    m_pending_render_scale =
+        m_max_dimension != 0 ? clamp_scale_to_max_dimension(wanted, m_max_dimension) : wanted;
 }
 
 void VulkanBackend::set_texture_replacements(TextureReplacements* replacements)

@@ -187,7 +187,12 @@ void Poly3DPass::shutdown()
         }
         target.polygon_set   = VK_NULL_HANDLE;
         target.decode_set    = VK_NULL_HANDLE;
+        // A rebuilt pass (a new render scale) copies the machine's data again.
+        target.texture_generation = 0;
+        target.table_generation   = 0;
+        target.tone_uploaded      = false;
     }
+    m_atlas_generation = 0;
 
     destroy_atlas();
     destroy_host_buffer(&m_atlas_staging);

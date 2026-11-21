@@ -75,6 +75,7 @@ bool GlBackend::init(osd::Window& window, const BackendConfig& config)
                  max_renderbuffer, fitted);
         m_render_scale = fitted;
     }
+    m_max_dimension = max_dimension;
     if (m_render_scale != 1) {
         SM2_INFO("gl: render scale %ux: 3D and composite targets at %ux%u",
                  m_render_scale, scaled_width(m_render_scale),
@@ -128,6 +129,27 @@ void GlBackend::set_widescreen(u32 columns, u32 wide_background)
     m_tilemaps.set_upscale_2d(static_cast<u32>(m_enhancement_options.upscale_2d));
     m_present.set_options(m_present_options);
     m_polygons.set_width(frame_width(m_columns));
+}
+
+void GlBackend::set_render_scale(u32 scale)
+{
+    u32 wanted = std::clamp(scale, 1U, kMaxRenderScale);
+    if (m_max_dimension != 0) {
+        wanted = clamp_scale_to_max_dimension(wanted, m_max_dimension);
+    }
+    if (wanted == m_render_scale) {
+        return;
+    }
+    // GL is synchronous: the scaled targets are recreated straight away.
+    m_model3_frame.wait();
+    m_present.shutdown();
+    m_render_scale = wanted;
+    if (!m_present.init(m_render_scale, frame_width(m_columns))) {
+        SM2_ERROR("gl: could not rebuild the frame at %ux", m_render_scale);
+    }
+    m_present.set_options(m_present_options);
+    m_polygons.set_render_scale(m_render_scale);
+    m_model3_width = 0;  // ensure_model3() rebuilds it at the new scale
 }
 
 void GlBackend::shutdown()

@@ -362,6 +362,9 @@ public:
     /// Model 3: 0 keeps the 3D 4:3, 1 also widens the scrolling 2D below it,
     /// 2 widens the 3D alone.
     virtual void set_widescreen(u32 columns, u32 wide_background) = 0;
+    /// The internal 3D render scale (1..kMaxRenderScale), changed while
+    /// running: the scaled targets are rebuilt before the next frame draws.
+    virtual void set_render_scale(u32 scale) { static_cast<void>(scale); }
 
     /// Where a spread HUD lies, per band of 48 rows (GameSpec::hud_bands).
     virtual void set_hud_bands(const std::array<u32, 4>& bands) { static_cast<void>(bands); }

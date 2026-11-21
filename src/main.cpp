@@ -2806,6 +2806,10 @@ int main(int argc, char** argv)
                 }
             }
 
+            // A change of the 3D render scale in the GUI applies from this frame;
+            // the software renderer stays at native.
+            backend->set_render_scale(use_software_renderer ? 1U : options.config.render_scale);
+
             // The scope closes before the continue below so a skipped frame's
             // SDL_Delay is not folded into present_wait.
             bool begin_ok;
