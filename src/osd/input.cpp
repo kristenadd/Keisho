@@ -1224,6 +1224,8 @@ Input::PadShortcuts Input::update_pad_shortcuts(bool enabled)
         if (!enabled) {
             pad.shortcut_down    = 0;
             pad.shortcut_claimed = 0;
+            pad.guide_down       = false;
+            pad.guide_solo       = false;
             continue;
         }
         const auto button = [&](SDL_GamepadButton b) {
@@ -1252,6 +1254,22 @@ Input::PadShortcuts Input::update_pad_shortcuts(bool enabled)
         out.screenshot   |= (started & kLB) != 0;
         out.rewind       |= (pad.shortcut_claimed & kDpadLeft) != 0;
         out.fast_forward |= (pad.shortcut_claimed & kDpadRight) != 0;
+
+        // Guide alone, pressed and let go: any other button while it is held
+        // makes it a chord instead (the shortcuts above, Service and Test).
+        const bool guide = button(SDL_GAMEPAD_BUTTON_GUIDE);
+        bool       other = false;
+        for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT && !other; ++b) {
+            other = b != SDL_GAMEPAD_BUTTON_GUIDE && button(static_cast<SDL_GamepadButton>(b));
+        }
+        if (guide && !pad.guide_down) {
+            pad.guide_solo = !other;
+        } else if (guide && other) {
+            pad.guide_solo = false;
+        } else if (!guide && pad.guide_down && pad.guide_solo) {
+            out.guide_tap = true;
+        }
+        pad.guide_down = guide;
     }
     return out;
 }

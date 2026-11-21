@@ -763,6 +763,7 @@ void Gui::draw_menu(Config& config, const std::vector<std::string>& gpu_names, I
     // own movement applies. With nothing of ours focused, Down goes to the
     // first row of the page and Up to the tabs.
     const ImGuiID window_id = ImGui::GetCurrentWindow()->ID;
+    bool          scroll_page_end = false;
     {
         const int  row   = m_nav.focused_row;
         const int  rows  = static_cast<int>(m_nav.free_rows.size());
@@ -786,6 +787,9 @@ void Gui::draw_menu(Config& config, const std::vector<std::string>& gpu_names, I
             }
             if (target != row && target >= 0) {
                 m_nav.target_row = target;
+                // Up from the foot's buttons: the page's last row, with the
+                // page scrolled to its end.
+                scroll_page_end = row == m_foot_row && target == m_foot_row - 1;
             }
         }
         m_nav.rows.clear();
@@ -885,6 +889,9 @@ void Gui::draw_menu(Config& config, const std::vector<std::string>& gpu_names, I
         default:           page_about(kit); break;
     }
     ImGui::Dummy(ImVec2(0.0f, kit.px(12.0f)));
+    if (scroll_page_end) {
+        ImGui::SetScrollHereY(1.0f);
+    }
     ImGui::EndChild();
     ImGui::PopID();
 
@@ -892,8 +899,13 @@ void Gui::draw_menu(Config& config, const std::vector<std::string>& gpu_names, I
     list->AddLine(ImVec2(a.x, foot_top), ImVec2(b.x, foot_top), p.line, kit.stroke());
     // Touch: buttons stand in for Esc (back to the game) and the Exit key
     // (back to the game list), at the foot's right.
+    // They are the last navigation row, after the page's: Down from the
+    // page's last row reaches them, Left/Right move between them.
     float touch_w = 0.0f;
+    m_foot_row    = -1;
     if (m_touch_ui) {
+        m_foot_row = static_cast<int>(m_nav.rows.size());
+        kit.nav_row();
         const bool  playing = !m_current_game.empty();
         const char* resume  = playing ? tr("Resume") : tr("Close");
         const char* games   = tr("Game list");

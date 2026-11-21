@@ -218,6 +218,8 @@ public:
 
     /// True while the System tab waits for a key to bind to a shortcut.
     [[nodiscard]] bool capturing_key() const { return m_capture_hotkey >= 0; }
+    /// A wheel, pad or gun control is waiting for a press.
+    [[nodiscard]] bool capturing_input() const;
     /// Binds `key` (an SDL_Keycode) to the shortcut being captured; Escape
     /// cancels.
     void capture_key(Config& config, u32 key);
@@ -320,8 +322,6 @@ private:
     void page_gamepad(ui::Kit& kit, Config& config, class Input* input);
     void page_wheel(ui::Kit& kit, Config& config, class Input* input);
     void page_lightgun(ui::Kit& kit, Config& config, class Input* input);
-    /// A wheel, pad or gun control is waiting for a press.
-    [[nodiscard]] bool capturing_input() const;
     void               cancel_captures();
     void draw_dir_picker_popup(Config& config);
     void draw_fps_overlay(float measured_hz, const char* renderer_label);
@@ -371,6 +371,7 @@ private:
     int         m_input_page  = 0;     ///< Input page: gamepad, wheel or light gun
     bool        m_popup_open  = false; ///< a popup of the menu was open this frame
     ui::NavState m_nav;                ///< where Up/Down focus is among the rows
+    int          m_foot_row = -1;      ///< the nav row of the foot's buttons (touch), last frame
     // Settings are saved a moment after they change (autosave()).
     std::optional<Config> m_saved_snapshot;
     float       m_dirty_seconds = 0.0f;

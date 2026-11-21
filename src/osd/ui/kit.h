@@ -164,6 +164,9 @@ public:
     /// group (and the start of a navigation row for it; `free` keeps ImGui's
     /// own movement among its items).
     void divider(bool free = false);
+    /// A new navigation row begins (NavState), for content drawn by hand
+    /// outside a group (the foot's buttons); whether focus is asked here.
+    void nav_row(bool free = false);
     /// Right after the first focusable item of content drawn by hand: moves
     /// focus to it when Up/Down asked for this row.
     void focus_if_asked();
@@ -205,8 +208,6 @@ private:
     /// Takes Left/Right (keyboard and D-pad) for the focused item `id` and
     /// says which way, -1, 0 or 1.
     static int steer(ImGuiID id);
-    /// A new navigation row begins (NavState); whether focus is asked here.
-    void nav_row(bool free);
     bool dropdown_impl(const char* name, const char* about, std::span<const std::string> labels,
                        int& value, char* filter, size_t filter_size, const Opts& opts);
     bool press_button(const char* label, ImVec2 at, ImVec2 size, Tone tone, Icon icon,

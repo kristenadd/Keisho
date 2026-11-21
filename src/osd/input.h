@@ -201,6 +201,9 @@ public:
         bool screenshot   = false;
         bool fast_forward = false;
         bool rewind       = false;
+        /// Guide pressed and let go with no other button: the menu, as a tap
+        /// on the screen opens it. The iOS Home button arrives as Guide.
+        bool guide_tap    = false;
     };
 
     /// Read the shortcuts; call once a frame, before poll(). A pad taking part
@@ -424,6 +427,9 @@ private:
         /// Shortcut controls down last frame, and those claimed by a shortcut.
         u8             shortcut_down    = 0;
         u8             shortcut_claimed = 0;
+        /// Guide is down, and no other button has been pressed since it went down.
+        bool           guide_down = false;
+        bool           guide_solo = false;
     };
 
     /// Whether the game sees this pad: not while it is in a shortcut.

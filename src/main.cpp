@@ -2526,6 +2526,11 @@ int main(int argc, char** argv)
             if (input.menu_button_pressed() || pad_shortcuts.menu) {
                 gui.toggle();
             }
+            // Guide (Home) on its own: as a tap on the game, the settings, and
+            // again to close them. Not while a pad button is being bound.
+            if (pad_shortcuts.guide_tap && !(gui.visible() && gui.capturing_input())) {
+                gui.toggle();
+            }
 
             // Opening the overlay pauses the game; the manual pause holds
             // independently. Audio and the pacer follow on each transition.
