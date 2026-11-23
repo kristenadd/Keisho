@@ -9682,7 +9682,7 @@
     </roms>
   </game>
 
-  <game name="vf3" board="model3">
+  <game name="vf3" board="model3" side_fill="stretch">
     <title>Virtua Fighter 3</title>
     <version>Japan, Revision D</version>
     <manufacturer>Sega</manufacturer>

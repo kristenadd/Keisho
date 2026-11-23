@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <array>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace sm2::hw {
 namespace {
@@ -406,6 +407,15 @@ void Model2Sound::configure_balance(const std::string& game_name)
         gains.fill(it->second);
         m_scsp.set_slot_gains(gains.data());
     }
+}
+
+void Model2Sound::configure_madrs_mirror(const std::string& game_name)
+{
+    static const std::unordered_set<std::string> kNoMirror = {
+        "doa", "doaa", "doaab", "doaae", "doab",
+        "vf2", "vf2a", "vf2b", "vf2o",
+    };
+    m_scsp.set_madrs_mirror(kNoMirror.count(game_name) == 0);
 }
 
 void Model2Sound::write16(u32 address, u16 value)

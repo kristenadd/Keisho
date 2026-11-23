@@ -2731,9 +2731,10 @@ int main(int argc, char** argv)
                     const rom::SideFill fill = loaded->game.side_fill;
                     const bool widen = columns != 0 && fill != rom::SideFill::Pillarbox;
                     input.set_widescreen(columns);
-                    backend->set_widescreen(columns, !widen                       ? 0u
-                                                     : fill == rom::SideFill::Mirror ? 1u
-                                                                                     : 2u);
+                    backend->set_widescreen(columns, !widen                        ? 0u
+                                                     : fill == rom::SideFill::Mirror  ? 1u
+                                                     : fill == rom::SideFill::Stretch ? 3u
+                                                                                      : 2u);
                 }
                 if (machine_iface) {
                     // The geometry engine and the backend must agree on the

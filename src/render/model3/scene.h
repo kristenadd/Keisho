@@ -44,6 +44,7 @@ struct SceneGeometry {
     u32  columns      = 0;  ///< Native columns added on each side (widescreen).
     bool widen        = true;   ///< Full-width viewports reach into the columns.
     bool wide_2d      = false;  ///< Scrolling layers behind the 3D do too.
+    bool stretch_2d   = false;  ///< Stretch the backdrop instead.
 
     [[nodiscard]] u32  x_res() const { return 496 * render_scale; }
     [[nodiscard]] u32  y_res() const { return 384 * render_scale; }

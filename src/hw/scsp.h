@@ -76,6 +76,11 @@ public:
     /// the direct-out and effect-send mixes. All unity leaves the mixer bit-exact.
     void set_slot_gains(const u16 gains[32]);
 
+    /// Whether 0x7C0-0x7FF mirrors MADRS, as in MAME and Supermodel (the default).
+    /// DOA and VF2 load MADRS and then clear that range, which wipes their delays
+    /// if it mirrors; VF3 does the same and only sounds right if it does.
+    void set_madrs_mirror(bool enabled) { m_madrs_mirror = enabled; }
+
     /// A byte arrived from the host's UART.
     void midi_in(u8 value);
 
@@ -300,6 +305,9 @@ private:
     u8  m_midi_transmit_byte = 0;
 
     u32 m_random_state = 0x1234'5678;
+
+    /// See set_madrs_mirror. Configuration, not saved.
+    bool m_madrs_mirror = true;
 
     /// Warned-once flags for conditions upstream reports through popmessage or
     /// logerror on every occurrence, which would otherwise flood the log.

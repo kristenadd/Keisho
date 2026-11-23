@@ -219,6 +219,7 @@ bool Model2::init(const rom::GameSpec& game, rom::RomSet roms)
     // the SCSP's MIDI in, and MIDI out back to the UART's receiver.
     m_sound.attach(m_roms.region("audiocpu"), m_roms.region("samples"));
     m_sound.configure_balance(m_game.name);
+    m_sound.configure_madrs_mirror(m_game.name);
     m_uart.set_tx_handler([this](u8 value) { m_sound.midi_in(value); });
     m_sound.set_midi_out_handler([this](u8 value) { m_uart.write_rxd(value); });
     m_uart.set_ready_handler([this] { sound_ready_w(); });

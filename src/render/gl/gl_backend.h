@@ -112,7 +112,7 @@ private:
     [[nodiscard]] bool ensure_model3();
     [[nodiscard]] model3::SceneGeometry model3_geometry() const
     {
-        return {m_render_scale, m_columns, m_model3_wide != 0, m_model3_wide == 1};
+        return {m_render_scale, m_columns, m_model3_wide != 0, m_model3_wide == 1, m_model3_wide == 3};
     }
 
     /// Shader texture-quality value for the current enhancement options, clamped

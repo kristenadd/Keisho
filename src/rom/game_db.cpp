@@ -393,6 +393,7 @@ constexpr u32 kModel3RamSize = 0x00800000;
     if (text == "black")      { *out = SideFill::Black;     return true; }
     if (text == "menu")       { *out = SideFill::Menu;      return true; }
     if (text == "pillarbox")  { *out = SideFill::Pillarbox; return true; }
+    if (text == "stretch")    { *out = SideFill::Stretch;   return true; }
     return false;
 }
 

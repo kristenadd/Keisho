@@ -140,6 +140,7 @@ void FrameBuilder::build(const hw::model3::VideoFrame& frame, bool encode_depth)
     const SceneGeometry& g = m_scene.geometry();
     m_tilegen.set_side_columns(g.columns);
     m_tilegen.set_extend(g.wide_2d && g.widen);
+    m_tilegen.set_stretch(g.stretch_2d && g.widen);
     m_tilegen.draw_frame(frame.tilegen_vram, frame.tilegen_regs, frame.tilegen_lines, frame.tilegen_writes);
     m_tilegen.finish_wide();
     m_times.tilegen = since(mark);
@@ -160,12 +161,27 @@ void FrameBuilder::build(const hw::model3::VideoFrame& frame, bool encode_depth)
     // An opaque top layer hides the 3D (Le Mans 24's boot screen draws a full
     // scene under it, Scud Race's a white flash); skip it unless line-of-sight
     // still needs the depth.
-    if (!m_plan.los_active() && top_layer_hides_3d()) {
+    const bool hidden = !m_plan.los_active() && top_layer_hides_3d();
+    if (hidden) {
         m_plan.passes.clear();
         m_plan.fogs.clear();
         m_plan.white_flash = false;
     }
-    plan_layers();
+    // 2D-only frames stay 4:3; 3D must last a few frames to widen them.
+    constexpr u32 kSettle = 8;
+    const bool drawn_3d   = !m_plan.passes.empty() && !m_plan.draws.empty();
+    m_frames_3d           = drawn_3d ? std::min(m_frames_3d + 1, kSettle) : 0;
+    const bool screen_2d  = m_frames_3d < kSettle && !m_plan.los_active();
+    if (screen_2d) {
+        m_plan.widened = false;
+    }
+    // A flash with no 3D stays 4:3 too.
+    if (!drawn_3d && !m_plan.los_active() && g.wide_screen()) {
+        PixelRect& d = m_plan.display;
+        d.x          = static_cast<s32>(g.x_offset()) + d.y;
+        d.width      = static_cast<s32>(g.x_res()) - 2 * d.y;
+    }
+    plan_layers(screen_2d);
     if (m_replacements != nullptr && !m_replacements->empty()) {
         apply_replacements();
     }
@@ -232,7 +248,7 @@ std::span<const u32> FrameBuilder::layer(int index) const
     return m_tilegen.side_columns() != 0 ? m_tilegen.wide_layer(index) : m_tilegen.layer(index);
 }
 
-void FrameBuilder::plan_layers()
+void FrameBuilder::plan_layers(bool screen_2d)
 {
     const SceneGeometry& g = m_scene.geometry();
     for (int i = 0; i < 2; i++) {
@@ -246,8 +262,10 @@ void FrameBuilder::plan_layers()
     if (side == 0) {
         return;
     }
-    // With no 3D reaching the side columns, only a scrolling background fills them.
-    if (!m_plan.widened) {
+    // 2D-only frames are pillarboxed.
+    if (screen_2d) {
+        m_tilegen.clear_sides();
+    } else if (!m_plan.widened) {
         m_tilegen.keep_scrolled_sides();
     }
     const u32 width = m_tilegen.wide_width();

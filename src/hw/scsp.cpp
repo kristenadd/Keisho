@@ -1114,8 +1114,11 @@ void Scsp::w16(u32 addr, u16 val)
 			*((u16 *) (m_DSP.COEF + (addr - 0x700) / 2)) = val;
 		else if (addr < 0x7c0)
 			*((u16 *) (m_DSP.MADRS + (addr - 0x780) / 2)) = val;
-		else if (addr < 0x800) // unmapped; doa clears it after loading MADRS
-			;
+		else if (addr < 0x800) // MADRS is mirrored twice; see set_madrs_mirror
+		{
+			if (m_madrs_mirror)
+				*((u16 *) (m_DSP.MADRS + (addr - 0x7c0) / 2)) = val;
+		}
 		else if (addr < 0xC00)
 		{
 			*((u16 *) (m_DSP.MPRO + (addr - 0x800) / 2)) = val;
@@ -1157,7 +1160,7 @@ u16 Scsp::r16(u32 addr)
 		else if (addr < 0x7c0)
 			v= *((u16 *) (m_DSP.MADRS + (addr - 0x780) / 2));
 		else if (addr < 0x800)
-			v = 0;
+			v = m_madrs_mirror ? *((u16 *) (m_DSP.MADRS + (addr - 0x7c0) / 2)) : 0;
 		else if (addr < 0xC00)
 			v= *((u16 *) (m_DSP.MPRO + (addr - 0x800) / 2));
 		else if (addr < 0xE00)

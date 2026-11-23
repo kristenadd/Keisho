@@ -187,7 +187,7 @@ public:
     }
 
 private:
-    [[nodiscard]] model3::SceneGeometry geometry() const { return {1, m_columns, m_wide != 0, m_wide == 1}; }
+    [[nodiscard]] model3::SceneGeometry geometry() const { return {1, m_columns, m_wide != 0, m_wide == 1, m_wide == 3}; }
 
     void draw()
     {

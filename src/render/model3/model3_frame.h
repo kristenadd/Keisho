@@ -103,7 +103,7 @@ public:
 
 private:
     void build(const hw::model3::VideoFrame& frame, bool encode_depth);
-    void plan_layers();
+    void plan_layers(bool screen_2d);
     void apply_replacements();
     void worker();
 
@@ -117,6 +117,7 @@ private:
     bool m_has_frame      = false;
     u64  m_frame_number   = 0;
     u64  m_builds         = 0;
+    u32  m_frames_3d      = 0;
 
     const hw::model3::VideoFrame* m_last = nullptr;
     BuildTimes                    m_times;

@@ -71,6 +71,10 @@ public:
     /// Apply the per-set flat gain that levels loudness across the library.
     void configure_balance(const std::string& game_name);
 
+    /// Turn off the SCSP's MADRS mirror for the sets whose driver clears the
+    /// mirror range after loading MADRS (DOA, VF2).
+    void configure_madrs_mirror(const std::string& game_name);
+
     /// Advance the board by the equivalent of `host_cycles` of the i960's 25 MHz
     /// clock. Remainders are carried between calls so the ratios stay exact.
     void run(u32 host_cycles);

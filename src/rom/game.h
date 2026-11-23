@@ -223,6 +223,7 @@ enum class SideFill : u8 {
     Menu,       ///< Black only for a row-scroll layer's foreground tiles,
                 ///< which is how some games build their menu panels.
     Pillarbox,  ///< Keep the whole picture 4:3 with black side bars.
+    Stretch,    ///< Model 3: stretch the backdrop across.
 };
 
 /// Which command set a title's force-feedback drive board speaks.

@@ -150,10 +150,11 @@ void PresentPass::begin_frame()
 
 void PresentPass::upload_from_host(std::span<const u32> pixels)
 {
-    // `pixels` must hold exactly kWidth * kHeight texels; unlike the Vulkan
-    // pass, there is no clamp.
+    if (pixels.size() < static_cast<usize>(m_native_width) * kHeight) {
+        return;
+    }
     BindTexture(GL_TEXTURE_2D, m_native_texture);
-    TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(kWidth),
+    TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(m_native_width),
                  static_cast<GLsizei>(kHeight), GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
 }
 

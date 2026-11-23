@@ -557,7 +557,7 @@ bool Gui::draw(Config& config, const std::vector<std::string>& gpu_names,
         }
     }
 
-    // A gun game hides the OS cursor so only the crosshair shows, but not while
+    // A gun game, or any game in fullscreen, hides the OS cursor, but not while
     // the overlay or picker is open, where the real pointer is needed.
     // NoMouseCursorChange stops ImGui's SDL3 backend re-showing the cursor every
     // frame.
@@ -569,8 +569,11 @@ bool Gui::draw(Config& config, const std::vector<std::string>& gpu_names,
     }
     using Mode          = Config::LightgunMode;
     const bool gun_game = playing != nullptr && playing->gun && config.lightgun != Mode::Off;
-    const bool hide_cursor = (gun_game || config.lightgun == Mode::On) && !m_visible && !m_picker_enabled
-                          && !m_load_error.has_value();
+    const bool gun_mode = gun_game || config.lightgun == Mode::On;
+    const bool in_game  = !m_visible && !m_picker_enabled && !m_load_error.has_value();
+    const bool fullscreen = m_window != nullptr
+                         && (SDL_GetWindowFlags(m_window) & SDL_WINDOW_FULLSCREEN) != 0;
+    const bool hide_cursor = in_game && (gun_mode || (fullscreen && !m_current_game.empty()));
     if (hide_cursor != m_cursor_hidden) {
         ImGuiIO& io = ImGui::GetIO();
         if (hide_cursor) {
@@ -584,15 +587,12 @@ bool Gui::draw(Config& config, const std::vector<std::string>& gpu_names,
     }
     // Confine the pointer in fullscreen, so a light gun that presents as a mouse
     // cannot drag it onto another monitor.
-    const bool grab = hide_cursor && m_window != nullptr
-                   && (SDL_GetWindowFlags(m_window) & SDL_WINDOW_FULLSCREEN) != 0;
+    const bool grab = in_game && gun_mode && fullscreen;
     if (grab != m_mouse_grabbed) {
         SDL_SetWindowMouseGrab(m_window, grab);
         m_mouse_grabbed = grab;
     }
     m_present_area = {};
-    const bool fullscreen = m_window != nullptr
-                         && (SDL_GetWindowFlags(m_window) & SDL_WINDOW_FULLSCREEN) != 0;
     if (config.bezel && fullscreen && !m_current_game.empty() && !m_picker_enabled
         && m_present_aspect != AspectMode::Widescreen && m_present_aspect != AspectMode::Stretch) {
         draw_bezel(config);

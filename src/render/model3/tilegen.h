@@ -58,6 +58,7 @@ public:
     /// Also carries a layer's rows out when its edges are one colour all the
     /// way down (a sky gradient, a frame).
     void set_extend(bool extend) { m_extend = extend; }
+    void set_stretch(bool stretch) { m_stretch = stretch; }
 
     /// A layer wide_width() across: the sides, then the 496 columns of
     /// layer() copied in by finish_wide().
@@ -65,6 +66,7 @@ public:
     void finish_wide();
     /// Clears the sides of all but the lines a scrolling layer filled.
     void keep_scrolled_sides();
+    void clear_sides();
     void reset_scroll();
 
 private:
@@ -112,6 +114,7 @@ private:
     void build_palette(int layer);
 
     [[nodiscard]] u32 tile_pixel(int index, bool four_bit, int x, int line, int scroll_x, int scroll_y) const;
+    void stretch_row(const u32* centre, u32* row) const;
     void draw_sides(int line, std::span<const u32> regs, int primary, int line_mask, const int scroll_x[2],
                     const int scroll_y[2], const bool scrolling[2]);
 
@@ -127,6 +130,7 @@ private:
 
     u32                  m_side = 0;
     bool                 m_extend = false;
+    bool                 m_stretch = false;
     std::array<std::vector<u32>, 2> m_wide;
     // Per layer and line: the scroll last drawn (~0 if off), frames since it
     // moved, and whether it counts as scrolling.
