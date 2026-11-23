@@ -889,9 +889,40 @@ sm2::Config persisted_config(const sm2::Config& current, const Options& options,
     return c;
 }
 
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+/// A self-contained Keisho.app (cmake/macos-bundle.sh) carries MoltenVK and its
+/// manifest in Contents/Resources/vulkan/icd.d. The Vulkan loader also searches
+/// the system locations (Homebrew's etc/vulkan/icd.d among them), so on a Mac
+/// with Homebrew's molten-vk it would load a second MoltenVK beside ours: two
+/// copies of the same Objective-C classes, and every GPU listed twice. Pin the
+/// loader to the bundled driver unless the user chose drivers themself.
+void use_bundled_vulkan_driver()
+{
+    for (const char* name : {"VK_DRIVER_FILES", "VK_ICD_FILENAMES", "VK_ADD_DRIVER_FILES"}) {
+        if (std::getenv(name) != nullptr) {
+            return;
+        }
+    }
+    const char* base = SDL_GetBasePath(); // Contents/Resources/ inside a bundle
+    if (base == nullptr) {
+        return;
+    }
+    const std::filesystem::path manifest =
+        std::filesystem::path(base) / "vulkan" / "icd.d" / "MoltenVK_icd.json";
+    std::error_code error;
+    if (std::filesystem::is_regular_file(manifest, error)) {
+        setenv("VK_DRIVER_FILES", manifest.string().c_str(), 0);
+    }
+}
+#endif
+
 int main(int argc, char** argv)
 {
     using namespace sm2;
+
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+    use_bundled_vulkan_driver();
+#endif
 
     Options options;
     if (!parse_command_line(argc, argv, &options)) {
