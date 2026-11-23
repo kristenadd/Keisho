@@ -1,0 +1,686 @@
+# Release builds of every platform: the Mac app (Developer ID, notarized, stapled, in a notarized
+# dmg), an ad-hoc iOS .ipa uploaded to Firebase App Distribution, and the Linux (x86_64, aarch64
+# AppImage + tarball) and Windows (zip) builds, which aren't code-signed. (build.yml still checks
+# every push and pull request, and keeps the rolling "dev" pre-release.)
+#
+# Runs on every push to main, on a pushed tag v* (which also attaches both files to that tag's
+# GitHub release), and by hand (Actions ▸ Release builds ▸ Run workflow). Put [skip release] in a
+# commit message to push without it. It runs only in kristenadd/Keisho, where the secrets are.
+#
+# Secrets (Settings ▸ Secrets and variables ▸ Actions). The names are the same as in
+# outrun2-decomp, PairMagic and SimulatorManager; ~/Projects/SigningSecrets exports them from the
+# login keychain and sets them (repos.conf line: developer-id apple-development
+# apple-distribution notary firebase:<project> var:IOS_BUNDLE_ID=… var:FIREBASE_PROJECT_NUMBER=…
+# var:FIREBASE_IOS_APP_ID=…).
+#   DEVELOPER_ID_P12_BASE64           "Developer ID Application" certificate + key, .p12, base64
+#   DEVELOPER_ID_P12_PASSWORD
+#   APPLE_DEVELOPMENT_P12_BASE64      "Apple Development" certificate + key (the iOS archive)
+#   APPLE_DEVELOPMENT_P12_PASSWORD
+#   APPLE_DISTRIBUTION_P12_BASE64     "Apple Distribution" certificate + key (the ad-hoc export)
+#   APPLE_DISTRIBUTION_P12_PASSWORD
+#   NOTARY_API_KEY_P8                 App Store Connect API key: the .p8 file's text, its key ID
+#   NOTARY_API_KEY_ID                 and issuer ID. Notarizes the Mac app, and the iOS job signs in
+#   NOTARY_API_ISSUER_ID              with it to make the provisioning profiles and register devices
+#                                     (that needs a key with access to Certificates, Identifiers &
+#                                     Profiles: Admin, if a Developer key is refused).
+#   NOTARY_APPLE_ID                   instead of the API key, for the Mac notarization only:
+#   NOTARY_APP_PASSWORD               an Apple ID and an app-specific password
+# Variables:
+#   IOS_BUNDLE_ID                     the iOS app's bundle id (registered for the team)
+#   XCODE_VERSION                     optional, e.g. 27.2 (default: the newest Xcode on the runner)
+#
+# The ad-hoc profile holds every device registered for the team at build time.
+#
+# Firebase App Distribution: testers open the Firebase invite on their iPhone / iPad, which
+# collects the device's UDID. Before archiving, the iOS job copies those UDIDs into the Apple
+# developer account (fastlane `sync_devices`), so the new .ipa installs on them; it then uploads the
+# .ipa to the tester groups (they get an install link).
+#   secrets:   FIREBASE_SERVICE_ACCOUNT_JSON   a service account key (JSON) with the role
+#                                              "Firebase App Distribution Admin"
+#   variables: FIREBASE_PROJECT_NUMBER         Firebase console ▸ Project settings ▸ General
+#              FIREBASE_IOS_APP_ID             the iOS app's App ID there (1:…:ios:…)
+#              FIREBASE_GROUPS                 tester group aliases for automatic runs
+#                                              (comma-separated; empty = upload with no groups)
+# Apple allows 100 iPhones / iPads per membership year; a registered device keeps its slot until
+# the year ends, even if removed.
+
+name: Release builds
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore: ['**.md', 'LICENSES/**', '.github/FUNDING.yml']
+  workflow_dispatch:
+    inputs:
+      mac:
+        description: Build the Mac app
+        type: boolean
+        default: true
+      ios:
+        description: Build the iOS app
+        type: boolean
+        default: true
+      linux:
+        description: Build the Linux AppImages and tarballs (x86_64, aarch64)
+        type: boolean
+        default: true
+      windows:
+        description: Build the Windows zip
+        type: boolean
+        default: true
+      sync_devices:
+        description: Register the Firebase testers' devices with Apple first
+        type: boolean
+        default: true
+      firebase:
+        description: Upload the .ipa to Firebase App Distribution
+        type: boolean
+        default: true
+      firebase_groups:
+        description: Firebase tester groups (comma-separated; empty = the FIREBASE_GROUPS variable)
+        type: string
+        default: ''
+
+concurrency:
+  group: release-builds-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  APPLE_TEAM_ID: B4H429V95D
+  SIGNING_IDENTITY: 'Developer ID Application: Kristen Addington (B4H429V95D)'
+  NOTARY_PROFILE: Keisho-Notary
+  BUILD_TYPE: Release
+  MOLTENVK_VERSION: v1.4.2
+
+jobs:
+  mac:
+    name: Mac app (notarized)
+    if: >-
+      github.repository == 'kristenadd/Keisho' &&
+      !contains(github.event.head_commit.message, '[skip release]') &&
+      (github.event_name != 'workflow_dispatch' || inputs.mac)
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode
+        run: |
+          if [ -n "${{ vars.XCODE_VERSION }}" ]; then xcode="/Applications/Xcode_${{ vars.XCODE_VERSION }}.app"
+          else xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1); fi
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: Install dependencies
+        run: |
+          brew install cmake ninja pkg-config ccache \
+            shaderc sdl3 pugixml curl \
+            vulkan-headers vulkan-loader molten-vk dylibbundler
+
+      - name: Cache ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: release-macos-arm64
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DSM2_BUILD_VULKAN=ON \
+            -DSM2_LTO=ON
+          cmake --build build
+          cmake --install build --prefix install
+          cmake/macos-bundle.sh install/Keisho.app
+          if otool -L install/Keisho.app/Contents/MacOS/Keisho install/Keisho.app/Contents/Frameworks/*.dylib \
+               | grep -E '/opt/homebrew|/usr/local/(opt|Cellar|lib)'; then
+            echo "::error::The app still links against Homebrew"; exit 1
+          fi
+
+      - name: Install the signing certificate
+        env:
+          P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          [ -n "$P12_BASE64" ] || { echo "::error::The DEVELOPER_ID_P12_BASE64 secret isn't set"; exit 1; }
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          keychain_password=$(openssl rand -base64 24)
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+
+          printf '%s' "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$P12_PASSWORD" -f pkcs12 \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -P "$RUNNER_TEMP/cert.p12"
+          # Apple's Developer ID intermediate, so codesign can build the full chain (a .p12 that
+          # already includes it makes this import report a duplicate).
+          curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$RUNNER_TEMP/DeveloperIDG2CA.cer"
+          if ! output=$(security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain" 2>&1); then
+            [[ "$output" == *"already exists"* ]] || { echo "$output"; exit 1; }
+          fi
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain"
+          echo "KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Save the notarization credentials
+        env:
+          API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+          API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+          APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          APP_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
+        run: |
+          if [ -n "$API_KEY_P8" ]; then
+            printf '%s\n' "$API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+            xcrun notarytool store-credentials "$NOTARY_PROFILE" --keychain "$KEYCHAIN" \
+              --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$API_KEY_ID" --issuer "$API_ISSUER_ID"
+            rm -P "$RUNNER_TEMP/AuthKey.p8"
+          elif [ -n "$APPLE_ID" ]; then
+            xcrun notarytool store-credentials "$NOTARY_PROFILE" --keychain "$KEYCHAIN" \
+              --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APP_PASSWORD"
+          else
+            echo "::error::Set either the NOTARY_API_KEY_* secrets or NOTARY_APPLE_ID and NOTARY_APP_PASSWORD"
+            exit 1
+          fi
+
+      - name: Sign
+        run: |
+          app=install/Keisho.app
+          # Inside out: the bundled dylibs (ad hoc from macos-bundle.sh) first, then the app with
+          # the hardened runtime and the JIT entitlement.
+          find "$app/Contents/Frameworks" -type f -name '*.dylib' -print0 |
+            xargs -0 codesign --force --options runtime --timestamp \
+              --sign "$SIGNING_IDENTITY" --keychain "$KEYCHAIN"
+          codesign --force --options runtime --timestamp \
+            --entitlements cmake/macos-entitlements.plist \
+            --sign "$SIGNING_IDENTITY" --keychain "$KEYCHAIN" "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -d --entitlements - "$app"
+
+      - name: Notarize and staple
+        run: |
+          notarize() {
+            xcrun notarytool submit "$1" --wait \
+              --keychain-profile "$NOTARY_PROFILE" --keychain "$KEYCHAIN" \
+              --output-format json | tee "$RUNNER_TEMP/notary.json"
+            grep -q '"status" *: *"Accepted"' "$RUNNER_TEMP/notary.json" || {
+              id=$(sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p' "$RUNNER_TEMP/notary.json" | head -1)
+              xcrun notarytool log "$id" --keychain-profile "$NOTARY_PROFILE" --keychain "$KEYCHAIN" || true
+              exit 1; }
+          }
+          app=install/Keisho.app
+          # The app first, so its own ticket is stapled (it then opens offline once copied out)...
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/notarize.zip"
+          notarize "$RUNNER_TEMP/notarize.zip"
+          xcrun stapler staple "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+
+          # ...then the dmg that carries it.
+          mkdir -p dist dmg-root
+          cp -R "$app" dmg-root/
+          ln -s /Applications dmg-root/Applications
+          hdiutil create -volname Keisho -srcfolder dmg-root -ov -format UDZO dist/Keisho-macos.dmg
+          codesign --force --timestamp --sign "$SIGNING_IDENTITY" --keychain "$KEYCHAIN" dist/Keisho-macos.dmg
+          notarize dist/Keisho-macos.dmg
+          xcrun stapler staple dist/Keisho-macos.dmg
+          spctl --assess --type open --context context:primary-signature --verbose=2 dist/Keisho-macos.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-dmg
+          path: dist/Keisho-macos.dmg
+
+      - name: Remove the keychain
+        if: always()
+        run: |
+          [ -n "${KEYCHAIN:-}" ] && security delete-keychain "$KEYCHAIN" || true
+
+  ios:
+    name: iOS ad-hoc .ipa
+    if: >-
+      github.repository == 'kristenadd/Keisho' &&
+      !contains(github.event.head_commit.message, '[skip release]') &&
+      (github.event_name != 'workflow_dispatch' || inputs.ios)
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode
+        run: |
+          if [ -n "${{ vars.XCODE_VERSION }}" ]; then xcode="/Applications/Xcode_${{ vars.XCODE_VERSION }}.app"
+          else xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1); fi
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: Check secrets
+        env:
+          KEY: ${{ secrets.NOTARY_API_KEY_P8 }}
+          DEV: ${{ secrets.APPLE_DEVELOPMENT_P12_BASE64 }}
+          DIST: ${{ secrets.APPLE_DISTRIBUTION_P12_BASE64 }}
+          BUNDLE: ${{ vars.IOS_BUNDLE_ID }}
+        run: |
+          for v in KEY:NOTARY_API_KEY_P8 DEV:APPLE_DEVELOPMENT_P12_BASE64 DIST:APPLE_DISTRIBUTION_P12_BASE64 BUNDLE:IOS_BUNDLE_ID; do
+            eval "[ -n \"\$${v%%:*}\" ]" || { echo "::error::${v#*:} isn't set (see the comment at the top of this workflow)"; exit 1; }
+          done
+
+      - name: Install tools
+        run: brew install cmake shaderc
+
+      - name: Cache MoltenVK
+        id: moltenvk
+        uses: actions/cache@v4
+        with:
+          path: 3rdparty/ios/MoltenVK
+          key: moltenvk-all-${{ env.MOLTENVK_VERSION }}
+
+      - name: Download MoltenVK
+        if: steps.moltenvk.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p 3rdparty/ios
+          curl -fsSL "https://github.com/KhronosGroup/MoltenVK/releases/download/$MOLTENVK_VERSION/MoltenVK-all.tar" \
+            | tar -x -C 3rdparty/ios
+          ls 3rdparty/ios/MoltenVK/MoltenVK/static/MoltenVK.xcframework/ios-arm64/libMoltenVK.a
+
+      - name: Install the signing certificates and the API key
+        env:
+          DEV_P12: ${{ secrets.APPLE_DEVELOPMENT_P12_BASE64 }}
+          DEV_PASSWORD: ${{ secrets.APPLE_DEVELOPMENT_P12_PASSWORD }}
+          DIST_P12: ${{ secrets.APPLE_DISTRIBUTION_P12_BASE64 }}
+          DIST_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_P12_PASSWORD }}
+          API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+        run: |
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          keychain_password=$(openssl rand -base64 24)
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          for pair in "DEV_P12:DEV_PASSWORD" "DIST_P12:DIST_PASSWORD"; do
+            eval "data=\$${pair%%:*}; password=\$${pair#*:}"
+            printf '%s' "$data" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$password" -f pkcs12 \
+              -T /usr/bin/codesign -T /usr/bin/security
+            rm -P "$RUNNER_TEMP/cert.p12"
+          done
+          # Apple's WWDR intermediate (G3) for the development / distribution chain.
+          curl -fsSL https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer -o "$RUNNER_TEMP/AppleWWDRCAG3.cer"
+          if ! output=$(security import "$RUNNER_TEMP/AppleWWDRCAG3.cer" -k "$keychain" 2>&1); then
+            [[ "$output" == *"already exists"* ]] || { echo "$output"; exit 1; }
+          fi
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain"
+          echo "KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          printf '%s\n' "$API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Set up fastlane
+        if: vars.FIREBASE_PROJECT_NUMBER != ''
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - name: Register the Firebase testers' devices
+        if: vars.FIREBASE_PROJECT_NUMBER != '' && (github.event_name != 'workflow_dispatch' || inputs.sync_devices)
+        env:
+          FIREBASE_PROJECT_NUMBER: ${{ vars.FIREBASE_PROJECT_NUMBER }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+        run: bundle exec fastlane ios sync_devices
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS \
+            -DSM2_IOS_TEAM="$APPLE_TEAM_ID" \
+            -DSM2_IOS_BUNDLE_ID="${{ vars.IOS_BUNDLE_ID }}" \
+            -DSM2_IOS_BUILD_NUMBER="${{ github.run_number }}" \
+            -DCMAKE_XCODE_ATTRIBUTE_SKIP_INSTALL=YES
+
+      - name: Archive
+        run: |
+          xcodebuild -project build-ios/keisho.xcodeproj -scheme keisho -configuration Release \
+            -destination generic/platform=iOS -archivePath "$RUNNER_TEMP/Keisho.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/dd" -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "${{ secrets.NOTARY_API_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.NOTARY_API_ISSUER_ID }}" \
+            archive
+          /usr/libexec/PlistBuddy -c 'Print :ApplicationProperties' "$RUNNER_TEMP/Keisho.xcarchive/Info.plist" || {
+            echo "::error::The archive holds no app (a generic archive): check SKIP_INSTALL"; exit 1; }
+
+      - name: Export the ad-hoc .ipa
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>release-testing</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>thinning</key><string>&lt;none&gt;</string>
+            <key>compileBitcode</key><false/>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Keisho.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "${{ secrets.NOTARY_API_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.NOTARY_API_ISSUER_ID }}"
+          mkdir -p dist
+          cp "$RUNNER_TEMP"/export/*.ipa dist/Keisho-ios-adhoc.ipa
+          # Which devices the profile covers (the ones that can install this build).
+          unzip -o -q dist/Keisho-ios-adhoc.ipa 'Payload/*/embedded.mobileprovision' -d "$RUNNER_TEMP/ipa"
+          security cms -D -i "$RUNNER_TEMP"/ipa/Payload/*/embedded.mobileprovision > "$RUNNER_TEMP/profile.plist"
+          echo "Provisioned devices:"; /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$RUNNER_TEMP/profile.plist" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: dist/Keisho-ios-adhoc.ipa
+
+      - name: Upload to Firebase App Distribution
+        if: vars.FIREBASE_IOS_APP_ID != '' && (github.event_name != 'workflow_dispatch' || inputs.firebase)
+        env:
+          FIREBASE_IOS_APP_ID: ${{ vars.FIREBASE_IOS_APP_ID }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          FIREBASE_GROUPS: ${{ inputs.firebase_groups || vars.FIREBASE_GROUPS }}
+        run: |
+          bundle exec fastlane ios distribute ipa:"$PWD/dist/Keisho-ios-adhoc.ipa" groups:"$FIREBASE_GROUPS" \
+            notes:"$(git log -1 --format='%h %s')"
+
+      - name: Remove the keychain and the API key
+        if: always()
+        run: |
+          [ -n "${KEYCHAIN:-}" ] && security delete-keychain "$KEYCHAIN" || true
+          rm -fP "$RUNNER_TEMP/AuthKey.p8"
+
+  # Linux and Windows: the same builds as build.yml (not code-signed), so one run of this workflow
+  # makes every platform's download.
+  linux-x86_64:
+    name: Linux x86_64 (AppImage + tarball)
+    if: >-
+      github.repository == 'kristenadd/Keisho' &&
+      !contains(github.event.head_commit.message, '[skip release]') &&
+      (github.event_name != 'workflow_dispatch' || inputs.linux)
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          # libsdl3-dev has no Ubuntu 24.04 package, so it's left out here on
+          # purpose: CMake falls back to the vendored 3rdparty/SDL submodule,
+          # same as any other Linux distro without a system SDL3.
+          # (libvulkan-memory-allocator-dev is skipped for the same reason —
+          # VMA is header-only and vendors just as easily.)
+          sudo apt-get install -y \
+            cmake ninja-build build-essential glslc \
+            libgl-dev libgles-dev libegl-dev \
+            libpugixml-dev libcurl4-openssl-dev \
+            libfontconfig-dev libharfbuzz-dev \
+            libvulkan-dev vulkan-validationlayers \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxfixes-dev libxss-dev libxrender-dev libxtst-dev \
+            libasound2-dev libpulse-dev libudev-dev \
+            libwayland-dev libwayland-bin libxkbcommon-dev libdecor-0-dev \
+            ccache patchelf file desktop-file-utils
+
+      - name: Cache ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: release-linux-x86_64
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DSM2_BUILD_VULKAN=ON \
+            -DSM2_LTO=ON \
+            -DSM2_TUNE=x86-64-v2
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Install into AppDir
+        run: cmake --install build --prefix AppDir/usr
+
+      - name: Build AppImage
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+          ./linuxdeploy-x86_64.AppImage --appimage-extract-and-run \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/keisho \
+            --desktop-file AppDir/usr/share/applications/keisho.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/keisho.png \
+            --output appimage
+          mkdir -p out
+          mv "$(find . -maxdepth 1 -name '*.AppImage' ! -name 'linuxdeploy-*.AppImage')" out/keisho-x86_64.AppImage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keisho-linux-x86_64-appimage
+          path: out/keisho-x86_64.AppImage
+
+      # A plain, non-AppImage package for anyone who'd rather just untar and
+      # run against their own system libraries — a second, independent
+      # `cmake --install` into its own directory, from the same build tree
+      # already compiled above (no rebuild).
+      - name: Install for tarball
+        run: cmake --install build --prefix "keisho-${VERSION}-linux-x86_64"
+
+      - name: Build tarball
+        run: |
+          mkdir -p out
+          tar czf "out/keisho-${VERSION}-linux-x86_64.tar.gz" "keisho-${VERSION}-linux-x86_64"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keisho-linux-x86_64-tarball
+          path: out/keisho-${{ env.VERSION }}-linux-x86_64.tar.gz
+
+  linux-aarch64:
+    name: Linux aarch64 (AppImage + tarball)
+    if: >-
+      github.repository == 'kristenadd/Keisho' &&
+      !contains(github.event.head_commit.message, '[skip release]') &&
+      (github.event_name != 'workflow_dispatch' || inputs.linux)
+    runs-on: ubuntu-24.04-arm
+    env:
+      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build build-essential glslc \
+            libgles-dev libegl-dev \
+            libpugixml-dev libcurl4-openssl-dev \
+            libfontconfig-dev libharfbuzz-dev \
+            libvulkan-dev vulkan-validationlayers \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxfixes-dev libxss-dev libxrender-dev libxtst-dev \
+            libasound2-dev libpulse-dev libudev-dev \
+            libwayland-dev libwayland-bin libxkbcommon-dev libdecor-0-dev \
+            ccache patchelf file desktop-file-utils
+
+      - name: Cache ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: release-linux-aarch64
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DSM2_BUILD_OPENGL_DESKTOP=OFF -DSM2_BUILD_OPENGL_ES=ON \
+            -DSM2_BUILD_VULKAN=ON \
+            -DSM2_LTO=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Install into AppDir
+        run: cmake --install build --prefix AppDir/usr
+
+      - name: Build AppImage
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-aarch64.AppImage
+          chmod +x linuxdeploy-aarch64.AppImage
+          ./linuxdeploy-aarch64.AppImage --appimage-extract-and-run \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/keisho \
+            --desktop-file AppDir/usr/share/applications/keisho.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/keisho.png \
+            --output appimage
+          mkdir -p out
+          mv "$(find . -maxdepth 1 -name '*.AppImage' ! -name 'linuxdeploy-*.AppImage')" out/keisho-aarch64.AppImage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keisho-linux-aarch64-appimage
+          path: out/keisho-aarch64.AppImage
+
+      # A plain, non-AppImage package for anyone who'd rather just untar and
+      # run against their own system libraries — a second, independent
+      # `cmake --install` into its own directory, from the same build tree
+      # already compiled above (no rebuild).
+      - name: Install for tarball
+        run: cmake --install build --prefix "keisho-${VERSION}-linux-aarch64"
+
+      - name: Build tarball
+        run: |
+          mkdir -p out
+          tar czf "out/keisho-${VERSION}-linux-aarch64.tar.gz" "keisho-${VERSION}-linux-aarch64"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keisho-linux-aarch64-tarball
+          path: out/keisho-${{ env.VERSION }}-linux-aarch64.tar.gz
+
+  windows-x86_64:
+    name: Windows x86_64 (zip)
+    if: >-
+      github.repository == 'kristenadd/Keisho' &&
+      !contains(github.event.head_commit.message, '[skip release]') &&
+      (github.event_name != 'workflow_dispatch' || inputs.windows)
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Put cl.exe / the MSVC environment on PATH so Ninja drives MSVC.
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # Provides VULKAN_SDK and glslc (needed by every build to lint shaders).
+      - name: Install Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          install_runtime: true
+          cache: true
+
+      # libcurl for the artwork scraper, static so the exe stays self-contained.
+      # The -md triplet keeps the dynamic CRT (/MD), matching the project's
+      # default runtime; plain x64-windows-static would use /MT and mismatch.
+      - name: Install libcurl (vcpkg)
+        run: vcpkg install curl:x64-windows-static-md
+
+      - name: Cache ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: release-windows-x86_64
+          variant: sccache
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} `
+            -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl `
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
+            -DSM2_BUILD_VULKAN=ON `
+            -DSM2_LTO=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Install
+        run: cmake --install build --prefix "keisho-${{ env.VERSION }}-windows-x86_64"
+
+      # The binary must start, print usage and load the game database.
+      - name: Smoke test
+        run: |
+          $exe = "keisho-${{ env.VERSION }}-windows-x86_64\keisho.exe"
+          & $exe --help
+          if ($LASTEXITCODE -ne 0) { throw "keisho --help exited $LASTEXITCODE" }
+          & $exe --list-games
+          if ($LASTEXITCODE -ne 0) { throw "keisho --list-games exited $LASTEXITCODE" }
+
+      - name: Build zip
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Compress-Archive -Path "keisho-${{ env.VERSION }}-windows-x86_64" `
+            -DestinationPath "out\keisho-${{ env.VERSION }}-windows-x86_64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keisho-windows-x86_64-zip
+          path: out/keisho-${{ env.VERSION }}-windows-x86_64.zip
+
+  release:
+    name: Attach to the GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [mac, ios, linux-x86_64, linux-aarch64, windows-x86_64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      # build.yml makes the same tag's release; whichever workflow gets there first creates it.
+      - name: Upload the signed builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes ||
+            sleep 30
+          gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber

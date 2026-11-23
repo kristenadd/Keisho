@@ -553,6 +553,8 @@ elseif(SM2_PLATFORM_IOS)
     endif()
     set(SM2_IOS_BUNDLE_ID "io.github.keisho-emu.keisho" CACHE STRING "iOS bundle identifier")
     set(SM2_IOS_TEAM "" CACHE STRING "Apple developer team id for device signing (Xcode generator)")
+    # CFBundleVersion; CI passes its run number so each upload is a new build.
+    set(SM2_IOS_BUILD_NUMBER "${PROJECT_VERSION}" CACHE STRING "iOS build number (CFBundleVersion)")
     if(SM2_PLATFORM_VISIONOS)
         set(sm2_plist_src "${CMAKE_SOURCE_DIR}/cmake/Info-visionOS.plist.in")
     else()
@@ -571,7 +573,7 @@ elseif(SM2_PLATFORM_IOS)
         MACOSX_BUNDLE_INFO_PLIST      "${CMAKE_BINARY_DIR}/Info-iOS.plist.in"
         MACOSX_BUNDLE_BUNDLE_NAME     "Keisho"
         MACOSX_BUNDLE_GUI_IDENTIFIER  "${SM2_IOS_BUNDLE_ID}"
-        MACOSX_BUNDLE_BUNDLE_VERSION        "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION        "${SM2_IOS_BUILD_NUMBER}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING  "${PROJECT_VERSION}"
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${SM2_IOS_BUNDLE_ID}"
         XCODE_ATTRIBUTE_ENABLE_BITCODE            "NO")
@@ -590,6 +592,12 @@ elseif(SM2_PLATFORM_IOS)
             XCODE_ATTRIBUTE_CODE_SIGN_STYLE    "Automatic"
             XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Apple Development")
     endif()
+    # `xcodebuild archive` must install the app, or the archive is a "generic"
+    # one that -exportArchive cannot make an .ipa from. The libraries skip
+    # installing (configure with -DCMAKE_XCODE_ATTRIBUTE_SKIP_INSTALL=YES).
+    set_target_properties(keisho PROPERTIES
+        XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
+        XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)")
     # Home-screen icons, scaled at configure time from a full-bleed square
     # (the round artwork over its own navy, so iOS's mask shows no black
     # corners). Vision Pro instead has a layered icon in an asset catalog, below.
