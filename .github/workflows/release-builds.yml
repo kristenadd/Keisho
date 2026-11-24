@@ -229,16 +229,16 @@ jobs:
           mkdir -p dist dmg-root
           cp -R "$app" dmg-root/
           ln -s /Applications dmg-root/Applications
-          hdiutil create -volname Keisho -srcfolder dmg-root -ov -format UDZO dist/Keisho-macos.dmg
-          codesign --force --timestamp --sign "$SIGNING_IDENTITY" --keychain "$KEYCHAIN" dist/Keisho-macos.dmg
-          notarize dist/Keisho-macos.dmg
-          xcrun stapler staple dist/Keisho-macos.dmg
-          spctl --assess --type open --context context:primary-signature --verbose=2 dist/Keisho-macos.dmg
+          hdiutil create -volname Keisho -srcfolder dmg-root -ov -format UDZO dist/keisho-macos-notarized.dmg
+          codesign --force --timestamp --sign "$SIGNING_IDENTITY" --keychain "$KEYCHAIN" dist/keisho-macos-notarized.dmg
+          notarize dist/keisho-macos-notarized.dmg
+          xcrun stapler staple dist/keisho-macos-notarized.dmg
+          spctl --assess --type open --context context:primary-signature --verbose=2 dist/keisho-macos-notarized.dmg
 
       - uses: actions/upload-artifact@v4
         with:
           name: mac-dmg
-          path: dist/Keisho-macos.dmg
+          path: dist/keisho-macos-notarized.dmg
 
       - name: Remove the keychain
         if: always()
@@ -383,16 +383,16 @@ jobs:
             -authenticationKeyID "${{ secrets.NOTARY_API_KEY_ID }}" \
             -authenticationKeyIssuerID "${{ secrets.NOTARY_API_ISSUER_ID }}"
           mkdir -p dist
-          cp "$RUNNER_TEMP"/export/*.ipa dist/Keisho-ios-adhoc.ipa
+          cp "$RUNNER_TEMP"/export/*.ipa dist/keisho-ios-adhoc.ipa
           # Which devices the profile covers (the ones that can install this build).
-          unzip -o -q dist/Keisho-ios-adhoc.ipa 'Payload/*/embedded.mobileprovision' -d "$RUNNER_TEMP/ipa"
+          unzip -o -q dist/keisho-ios-adhoc.ipa 'Payload/*/embedded.mobileprovision' -d "$RUNNER_TEMP/ipa"
           security cms -D -i "$RUNNER_TEMP"/ipa/Payload/*/embedded.mobileprovision > "$RUNNER_TEMP/profile.plist"
           echo "Provisioned devices:"; /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$RUNNER_TEMP/profile.plist" || true
 
       - uses: actions/upload-artifact@v4
         with:
           name: ios-ipa
-          path: dist/Keisho-ios-adhoc.ipa
+          path: dist/keisho-ios-adhoc.ipa
 
       - name: Upload to Firebase App Distribution
         if: vars.FIREBASE_IOS_APP_ID != '' && (github.event_name != 'workflow_dispatch' || inputs.firebase)
@@ -401,7 +401,7 @@ jobs:
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
           FIREBASE_GROUPS: ${{ inputs.firebase_groups || vars.FIREBASE_GROUPS }}
         run: |
-          bundle exec fastlane ios distribute ipa:"$PWD/dist/Keisho-ios-adhoc.ipa" groups:"$FIREBASE_GROUPS" \
+          bundle exec fastlane ios distribute ipa:"$PWD/dist/keisho-ios-adhoc.ipa" groups:"$FIREBASE_GROUPS" \
             notes:"$(git log -1 --format='%h %s')"
 
       - name: Remove the keychain and the API key
@@ -664,9 +664,13 @@ jobs:
           name: keisho-windows-x86_64-zip
           path: out/keisho-${{ env.VERSION }}-windows-x86_64.zip
 
+  # A tag: every file goes on that tag's release. A push to main: the signed Mac and iOS builds join
+  # build.yml's rolling "dev" pre-release, which already has that commit's Linux and Windows builds.
   release:
     name: Attach to the GitHub release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.ref == 'refs/heads/main' && github.event_name == 'push')
     needs: [mac, ios, linux-x86_64, linux-aarch64, windows-x86_64]
     runs-on: ubuntu-latest
     steps:
@@ -675,7 +679,8 @@ jobs:
           path: dist
           merge-multiple: true
       # build.yml makes the same tag's release; whichever workflow gets there first creates it.
-      - name: Upload the signed builds
+      - name: Upload to the tag's release
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
@@ -684,3 +689,15 @@ jobs:
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes ||
             sleep 30
           gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+      # The fixed names replace the previous commit's files, as build.yml's do.
+      - name: Upload to the dev pre-release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for _ in $(seq 1 20); do
+            gh release view dev --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
+            echo "waiting for build.yml to make the dev release"; sleep 30
+          done
+          gh release upload dev dist/keisho-macos-notarized.dmg dist/keisho-ios-adhoc.ipa \
+            --repo "$GITHUB_REPOSITORY" --clobber
