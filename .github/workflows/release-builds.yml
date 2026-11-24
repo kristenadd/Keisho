@@ -3,9 +3,17 @@
 # AppImage + tarball) and Windows (zip) builds, which aren't code-signed. (build.yml still checks
 # every push and pull request, and keeps the rolling "dev" pre-release.)
 #
-# Runs on every push to main, on a pushed tag v* (which also attaches both files to that tag's
-# GitHub release), and by hand (Actions ▸ Release builds ▸ Run workflow). Put [skip release] in a
-# commit message to push without it. It runs only in kristenadd/Keisho, where the secrets are.
+# Runs on every push to main, on a pushed tag v*, and by hand (Actions ▸ Release builds ▸ Run
+# workflow). Put [skip release] in a commit message to push without it. It runs only in
+# kristenadd/Keisho, where the secrets are.
+#
+# Versions: a push to main is released as v<version>.<revision>, where <version> is the project
+# VERSION in CMakeLists.txt (from upstream) and <revision> counts up from 1 for each release of that
+# version (v0.9.63.1, v0.9.63.2, …; a new upstream version starts again at .1). Once every build has
+# succeeded, the release job creates the tag on the commit and a GitHub release with all the files,
+# and also puts the signed Mac and iOS builds on build.yml's rolling "dev" pre-release. A failed
+# or cancelled run tags nothing. The revision is also the Mac and iOS apps' build number
+# (CFBundleVersion). A run by hand builds the next version's files without releasing them.
 #
 # Secrets (Settings ▸ Secrets and variables ▸ Actions). The names are the same as in
 # outrun2-decomp, PairMagic and SimulatorManager; ~/Projects/SigningSecrets exports them from the
@@ -82,9 +90,11 @@ on:
         type: string
         default: ''
 
+# On main a newer push waits for the running release instead of cancelling it, so two runs can't
+# claim the same revision.
 concurrency:
   group: release-builds-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: write
@@ -97,8 +107,45 @@ env:
   MOLTENVK_VERSION: v1.4.2
 
 jobs:
+  version:
+    name: Version
+    if: >-
+      github.repository == 'kristenadd/Keisho' &&
+      !contains(github.event.head_commit.message, '[skip release]')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      build: ${{ steps.v.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: v
+        run: |
+          base=$(sed -n 's/^ *VERSION *\([0-9][0-9.]*\).*/\1/p' CMakeLists.txt | head -1)
+          [ -n "$base" ] || { echo "::error::No project VERSION in CMakeLists.txt"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag=$GITHUB_REF_NAME
+            version=${tag#v}
+          else
+            # The highest v<base>.<n> tag so far, plus one.
+            last=$(git ls-remote --tags origin "refs/tags/v$base.*" | sed 's|.*refs/tags/v||' |
+                   grep -E "^$(printf '%s' "$base" | sed 's/\./\\./g')\.[0-9]+$" | sed 's/.*\.//' |
+                   sort -n | tail -1 || true)
+            version="$base.$(( ${last:-0} + 1 ))"
+            tag="v$version"
+          fi
+          case "$version" in
+            "$base".*) build=${version##*.} ;;
+            *)         build=$GITHUB_RUN_NUMBER ;;
+          esac
+          echo "Version $version (tag $tag, build $build)"
+          { echo "version=$version"; echo "tag=$tag"; echo "build=$build"; } >> "$GITHUB_OUTPUT"
+
   mac:
     name: Mac app (notarized)
+    needs: version
     if: >-
       github.repository == 'kristenadd/Keisho' &&
       !contains(github.event.head_commit.message, '[skip release]') &&
@@ -135,7 +182,8 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSM2_BUILD_VULKAN=ON \
-            -DSM2_LTO=ON
+            -DSM2_LTO=ON \
+            -DSM2_BUILD_NUMBER="${{ needs.version.outputs.build }}"
           cmake --build build
           cmake --install build --prefix install
           cmake/macos-bundle.sh install/Keisho.app
@@ -247,6 +295,7 @@ jobs:
 
   ios:
     name: iOS ad-hoc .ipa
+    needs: version
     if: >-
       github.repository == 'kristenadd/Keisho' &&
       !contains(github.event.head_commit.message, '[skip release]') &&
@@ -348,7 +397,7 @@ jobs:
           cmake -S . -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS \
             -DSM2_IOS_TEAM="$APPLE_TEAM_ID" \
             -DSM2_IOS_BUNDLE_ID="${{ vars.IOS_BUNDLE_ID }}" \
-            -DSM2_IOS_BUILD_NUMBER="${{ github.run_number }}" \
+            -DSM2_BUILD_NUMBER="${{ needs.version.outputs.build }}" \
             -DCMAKE_XCODE_ATTRIBUTE_SKIP_INSTALL=YES
 
       - name: Archive
@@ -402,7 +451,7 @@ jobs:
           FIREBASE_GROUPS: ${{ inputs.firebase_groups || vars.FIREBASE_GROUPS }}
         run: |
           bundle exec fastlane ios distribute ipa:"$PWD/dist/keisho-ios-adhoc.ipa" groups:"$FIREBASE_GROUPS" \
-            notes:"$(git log -1 --format='%h %s')"
+            notes:"Keisho ${{ needs.version.outputs.version }}: $(git log -1 --format='%h %s')"
 
       - name: Remove the keychain and the API key
         if: always()
@@ -414,13 +463,14 @@ jobs:
   # makes every platform's download.
   linux-x86_64:
     name: Linux x86_64 (AppImage + tarball)
+    needs: version
     if: >-
       github.repository == 'kristenadd/Keisho' &&
       !contains(github.event.head_commit.message, '[skip release]') &&
       (github.event_name != 'workflow_dispatch' || inputs.linux)
     runs-on: ubuntu-24.04
     env:
-      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+      VERSION: ${{ needs.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -504,13 +554,14 @@ jobs:
 
   linux-aarch64:
     name: Linux aarch64 (AppImage + tarball)
+    needs: version
     if: >-
       github.repository == 'kristenadd/Keisho' &&
       !contains(github.event.head_commit.message, '[skip release]') &&
       (github.event_name != 'workflow_dispatch' || inputs.linux)
     runs-on: ubuntu-24.04-arm
     env:
-      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+      VERSION: ${{ needs.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -589,13 +640,14 @@ jobs:
 
   windows-x86_64:
     name: Windows x86_64 (zip)
+    needs: version
     if: >-
       github.repository == 'kristenadd/Keisho' &&
       !contains(github.event.head_commit.message, '[skip release]') &&
       (github.event_name != 'workflow_dispatch' || inputs.windows)
     runs-on: windows-latest
     env:
-      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+      VERSION: ${{ needs.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -664,36 +716,46 @@ jobs:
           name: keisho-windows-x86_64-zip
           path: out/keisho-${{ env.VERSION }}-windows-x86_64.zip
 
-  # A tag: every file goes on that tag's release. A push to main: the signed Mac and iOS builds join
-  # build.yml's rolling "dev" pre-release, which already has that commit's Linux and Windows builds.
+  # A push to main: tag the commit v<version>.<revision> and release every file under it. A pushed
+  # tag: every file goes on that tag's release. Either way the signed Mac and iOS builds of main
+  # also join build.yml's rolling "dev" pre-release, which has that commit's Linux and Windows builds.
   release:
-    name: Attach to the GitHub release
+    name: Tag and release
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       (github.ref == 'refs/heads/main' && github.event_name == 'push')
-    needs: [mac, ios, linux-x86_64, linux-aarch64, windows-x86_64]
+    needs: [version, mac, ios, linux-x86_64, linux-aarch64, windows-x86_64]
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.version.outputs.tag }}
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+
+      # gh makes the tag on this commit. (A tag pushed with the workflow's token starts no other
+      # workflows, so this doesn't build everything again.)
+      - name: Tag and release
+        if: github.ref == 'refs/heads/main'
+        run: |
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Keisho $VERSION" --generate-notes --latest
+
       # build.yml makes the same tag's release; whichever workflow gets there first creates it.
       - name: Upload to the tag's release
         if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes ||
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Keisho $VERSION" --generate-notes ||
             sleep 30
           gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+
       # The fixed names replace the previous commit's files, as build.yml's do.
       - name: Upload to the dev pre-release
         if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           for _ in $(seq 1 20); do
             gh release view dev --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break

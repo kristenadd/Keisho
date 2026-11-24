@@ -506,6 +506,10 @@ if(SM2_PLATFORM_VISIONOS)
                                        "-L${sm2_toolchain}/lib/swift/${sm2_swift_platform}")
 endif()
 
+# The Mac and iOS bundles' CFBundleVersion. CI's release builds pass the
+# release's revision (the 4 of v0.9.63.4), so each one is a newer build.
+set(SM2_BUILD_NUMBER "${PROJECT_VERSION}" CACHE STRING "Build number (CFBundleVersion) of the Apple bundles")
+
 # On macOS build a .app bundle so Finder and the Dock show the icon.
 if(SM2_PLATFORM_MACOS)
     set(SM2_MACOS_ICNS "${CMAKE_SOURCE_DIR}/data/icons/keisho.icns")
@@ -515,7 +519,7 @@ if(SM2_PLATFORM_MACOS)
         MACOSX_BUNDLE_INFO_PLIST      "${CMAKE_SOURCE_DIR}/cmake/Info.plist.in"
         MACOSX_BUNDLE_BUNDLE_NAME     "Keisho"
         MACOSX_BUNDLE_GUI_IDENTIFIER  "io.github.keisho-emu.keisho"
-        MACOSX_BUNDLE_BUNDLE_VERSION        "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION        "${SM2_BUILD_NUMBER}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING  "${PROJECT_VERSION}"
         MACOSX_BUNDLE_ICON_FILE       "keisho.icns")
     # Package the icns and the ROM database into Contents/Resources so the
@@ -553,8 +557,6 @@ elseif(SM2_PLATFORM_IOS)
     endif()
     set(SM2_IOS_BUNDLE_ID "io.github.keisho-emu.keisho" CACHE STRING "iOS bundle identifier")
     set(SM2_IOS_TEAM "" CACHE STRING "Apple developer team id for device signing (Xcode generator)")
-    # CFBundleVersion; CI passes its run number so each upload is a new build.
-    set(SM2_IOS_BUILD_NUMBER "${PROJECT_VERSION}" CACHE STRING "iOS build number (CFBundleVersion)")
     if(SM2_PLATFORM_VISIONOS)
         set(sm2_plist_src "${CMAKE_SOURCE_DIR}/cmake/Info-visionOS.plist.in")
     else()
@@ -573,7 +575,7 @@ elseif(SM2_PLATFORM_IOS)
         MACOSX_BUNDLE_INFO_PLIST      "${CMAKE_BINARY_DIR}/Info-iOS.plist.in"
         MACOSX_BUNDLE_BUNDLE_NAME     "Keisho"
         MACOSX_BUNDLE_GUI_IDENTIFIER  "${SM2_IOS_BUNDLE_ID}"
-        MACOSX_BUNDLE_BUNDLE_VERSION        "${SM2_IOS_BUILD_NUMBER}"
+        MACOSX_BUNDLE_BUNDLE_VERSION        "${SM2_BUILD_NUMBER}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING  "${PROJECT_VERSION}"
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${SM2_IOS_BUNDLE_ID}"
         XCODE_ATTRIBUTE_ENABLE_BITCODE            "NO")
