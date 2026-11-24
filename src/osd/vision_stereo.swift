@@ -202,7 +202,10 @@ func sm2_vision_stereo_present(_ window: UnsafeMutableRawPointer?, _ texture: Un
         }
         model.show(source, width: Int(width), height: Int(height), visible: show)
         if let host = StereoLayer.host, let parent = host.view.superview {
-            parent.bringSubviewToFront(host.view)
+            // UIKit's Swift name for this differs between SDKs: bringSubview(toFront:) in
+            // visionOS 26 (Xcode 26), bringSubviewToFront(_:) in visionOS 27. The Objective-C
+            // selector is the same in both, so call that.
+            _ = parent.perform(NSSelectorFromString("bringSubviewToFront:"), with: host.view)
         }
     }
 }
