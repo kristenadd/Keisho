@@ -1,5 +1,6 @@
 # Release builds of every platform: the Mac app (Developer ID, notarized, stapled, in a notarized
-# dmg), an ad-hoc iOS .ipa uploaded to Firebase App Distribution, and the Linux (x86_64, aarch64
+# dmg), an ad-hoc iOS .ipa uploaded to Firebase App Distribution, an ad-hoc Apple Vision Pro .ipa
+# (it installs on the Vision Pros registered with Apple; Firebase can't distribute it), and the Linux (x86_64, aarch64
 # AppImage + tarball) and Windows (zip) builds, which aren't code-signed. (build.yml still checks
 # every push and pull request, and keeps the rolling "dev" pre-release.)
 #
@@ -66,7 +67,7 @@ on:
         type: boolean
         default: true
       ios:
-        description: Build the iOS app
+        description: Build the iOS and visionOS apps
         type: boolean
         default: true
       linux:
@@ -293,8 +294,10 @@ jobs:
         run: |
           [ -n "${KEYCHAIN:-}" ] && security delete-keychain "$KEYCHAIN" || true
 
+  # iOS and Apple Vision Pro: the same CMake project, archived for each platform with its own
+  # ad-hoc profile. Only the iOS build goes to Firebase, which doesn't distribute visionOS apps.
   ios:
-    name: iOS ad-hoc .ipa
+    name: ${{ matrix.name }}
     needs: version
     if: >-
       github.repository == 'kristenadd/Keisho' &&
@@ -302,6 +305,20 @@ jobs:
       (github.event_name != 'workflow_dispatch' || inputs.ios)
     runs-on: macos-26
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ios
+            name: iOS ad-hoc .ipa
+            system: iOS
+            sdk: iphoneos
+          - platform: visionos
+            name: visionOS ad-hoc .ipa
+            system: visionOS
+            sdk: xros
+    env:
+      IPA: keisho-${{ matrix.platform }}-adhoc.ipa
     steps:
       - uses: actions/checkout@v4
         with:
@@ -313,6 +330,12 @@ jobs:
           else xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1); fi
           sudo xcode-select -s "$xcode"
           xcodebuild -version
+
+      - name: Install the ${{ matrix.system }} platform
+        run: |
+          xcodebuild -showsdks | grep -q -- "-sdk ${{ matrix.sdk }}" ||
+            xcodebuild -downloadPlatform ${{ matrix.system }}
+          xcodebuild -showsdks | grep -- "-sdk ${{ matrix.sdk }}"
 
       - name: Check secrets
         env:
@@ -341,7 +364,7 @@ jobs:
           mkdir -p 3rdparty/ios
           curl -fsSL "https://github.com/KhronosGroup/MoltenVK/releases/download/$MOLTENVK_VERSION/MoltenVK-all.tar" \
             | tar -x -C 3rdparty/ios
-          ls 3rdparty/ios/MoltenVK/MoltenVK/static/MoltenVK.xcframework/ios-arm64/libMoltenVK.a
+          ls 3rdparty/ios/MoltenVK/MoltenVK/static/MoltenVK.xcframework/{ios-arm64,xros-arm64}/libMoltenVK.a
 
       - name: Install the signing certificates and the API key
         env:
@@ -376,14 +399,14 @@ jobs:
           chmod 600 "$RUNNER_TEMP/AuthKey.p8"
 
       - name: Set up fastlane
-        if: vars.FIREBASE_PROJECT_NUMBER != ''
+        if: matrix.platform == 'ios' && vars.FIREBASE_PROJECT_NUMBER != ''
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
           bundler-cache: true
 
       - name: Register the Firebase testers' devices
-        if: vars.FIREBASE_PROJECT_NUMBER != '' && (github.event_name != 'workflow_dispatch' || inputs.sync_devices)
+        if: matrix.platform == 'ios' && vars.FIREBASE_PROJECT_NUMBER != '' && (github.event_name != 'workflow_dispatch' || inputs.sync_devices)
         env:
           FIREBASE_PROJECT_NUMBER: ${{ vars.FIREBASE_PROJECT_NUMBER }}
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
@@ -394,7 +417,7 @@ jobs:
 
       - name: Configure
         run: |
-          cmake -S . -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS \
+          cmake -S . -B build-apple -G Xcode -DCMAKE_SYSTEM_NAME=${{ matrix.system }} \
             -DSM2_IOS_TEAM="$APPLE_TEAM_ID" \
             -DSM2_IOS_BUNDLE_ID="${{ vars.IOS_BUNDLE_ID }}" \
             -DSM2_BUILD_NUMBER="${{ needs.version.outputs.build }}" \
@@ -402,8 +425,8 @@ jobs:
 
       - name: Archive
         run: |
-          xcodebuild -project build-ios/keisho.xcodeproj -scheme keisho -configuration Release \
-            -destination generic/platform=iOS -archivePath "$RUNNER_TEMP/Keisho.xcarchive" \
+          xcodebuild -project build-apple/keisho.xcodeproj -scheme keisho -configuration Release \
+            -destination generic/platform=${{ matrix.system }} -archivePath "$RUNNER_TEMP/Keisho.xcarchive" \
             -derivedDataPath "$RUNNER_TEMP/dd" -allowProvisioningUpdates \
             -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
             -authenticationKeyID "${{ secrets.NOTARY_API_KEY_ID }}" \
@@ -432,25 +455,25 @@ jobs:
             -authenticationKeyID "${{ secrets.NOTARY_API_KEY_ID }}" \
             -authenticationKeyIssuerID "${{ secrets.NOTARY_API_ISSUER_ID }}"
           mkdir -p dist
-          cp "$RUNNER_TEMP"/export/*.ipa dist/keisho-ios-adhoc.ipa
+          cp "$RUNNER_TEMP"/export/*.ipa "dist/$IPA"
           # Which devices the profile covers (the ones that can install this build).
-          unzip -o -q dist/keisho-ios-adhoc.ipa 'Payload/*/embedded.mobileprovision' -d "$RUNNER_TEMP/ipa"
+          unzip -o -q "dist/$IPA" 'Payload/*/embedded.mobileprovision' -d "$RUNNER_TEMP/ipa"
           security cms -D -i "$RUNNER_TEMP"/ipa/Payload/*/embedded.mobileprovision > "$RUNNER_TEMP/profile.plist"
           echo "Provisioned devices:"; /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$RUNNER_TEMP/profile.plist" || true
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ios-ipa
-          path: dist/keisho-ios-adhoc.ipa
+          name: ${{ matrix.platform }}-ipa
+          path: dist/${{ env.IPA }}
 
       - name: Upload to Firebase App Distribution
-        if: vars.FIREBASE_IOS_APP_ID != '' && (github.event_name != 'workflow_dispatch' || inputs.firebase)
+        if: matrix.platform == 'ios' && vars.FIREBASE_IOS_APP_ID != '' && (github.event_name != 'workflow_dispatch' || inputs.firebase)
         env:
           FIREBASE_IOS_APP_ID: ${{ vars.FIREBASE_IOS_APP_ID }}
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
           FIREBASE_GROUPS: ${{ inputs.firebase_groups || vars.FIREBASE_GROUPS }}
         run: |
-          bundle exec fastlane ios distribute ipa:"$PWD/dist/keisho-ios-adhoc.ipa" groups:"$FIREBASE_GROUPS" \
+          bundle exec fastlane ios distribute ipa:"$PWD/dist/$IPA" groups:"$FIREBASE_GROUPS" \
             notes:"Keisho ${{ needs.version.outputs.version }}: $(git log -1 --format='%h %s')"
 
       - name: Remove the keychain and the API key
@@ -761,5 +784,5 @@ jobs:
             gh release view dev --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
             echo "waiting for build.yml to make the dev release"; sleep 30
           done
-          gh release upload dev dist/keisho-macos-notarized.dmg dist/keisho-ios-adhoc.ipa \
+          gh release upload dev dist/keisho-macos-notarized.dmg dist/keisho-ios-adhoc.ipa dist/keisho-visionos-adhoc.ipa \
             --repo "$GITHUB_REPOSITORY" --clobber
