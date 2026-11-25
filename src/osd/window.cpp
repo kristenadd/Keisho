@@ -18,6 +18,7 @@
 
 #include "core/log.h"
 #include "osd/app_icon.h"
+#include "osd/ios_view_frame.h"
 
 #include <cstdio>
 #include <SDL3/SDL.h>
@@ -153,6 +154,9 @@ void Window::drawable_size(u32* out_width, u32* out_height) const
     int width = 0;
     int height = 0;
     if (m_window != nullptr) {
+        // iOS: undo SDL turning a landscape view portrait (osd/ios_view_frame.h)
+        // before reading the size the swapchain is made at.
+        fit_view_to_window(m_window);
         SDL_GetWindowSizeInPixels(m_window, &width, &height);
     }
     *out_width  = static_cast<u32>(std::max(width, 0));

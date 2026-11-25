@@ -399,8 +399,9 @@ add_library(sm2_osd STATIC
 )
 # The system folder picker: the Files app's on iOS; elsewhere the overlay's own.
 if(SM2_PLATFORM_IOS)
-    target_sources(sm2_osd PRIVATE osd/folder_picker_ios.mm osd/launch_splash.mm)
-    set_source_files_properties(osd/folder_picker_ios.mm osd/launch_splash.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_sources(sm2_osd PRIVATE osd/folder_picker_ios.mm osd/ios_view_frame.mm osd/launch_splash.mm)
+    set_source_files_properties(osd/folder_picker_ios.mm osd/ios_view_frame.mm osd/launch_splash.mm
+                                PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(sm2_osd PRIVATE "-framework UIKit" "-framework UniformTypeIdentifiers")
 else()
     target_sources(sm2_osd PRIVATE osd/folder_picker_none.cpp)
