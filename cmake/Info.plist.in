@@ -23,5 +23,10 @@
     <true/>
     <key>LSMinimumSystemVersion</key>
     <string>11.0</string>
+    <!-- A games category lets macOS 14+ turn on Game Mode in full screen. -->
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.arcade-games</string>
+    <key>LSSupportsGameMode</key>
+    <true/>
 </dict>
 </plist>
