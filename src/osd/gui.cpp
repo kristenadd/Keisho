@@ -1079,12 +1079,15 @@ void Gui::page_display(ui::Kit& kit, Config& config, const std::vector<std::stri
         }
     }
     {
-        int  brightness = static_cast<int>(config.brightness);
+        // Model 1/2 and Model 3 keep their own setting: the boards' neutral
+        // points differ, so one value can't suit both.
+        u32& setting    = m_model3_running ? config.brightness_model3 : config.brightness;
+        int  brightness = static_cast<int>(setting);
         char shown[16];
         std::snprintf(shown, sizeof shown, "%d%%", brightness);
         kit.tip(tr("Where the picture's black sits. 50% matches an arcade capture; lower is darker."));
         if (kit.slider(tr("Brightness"), nullptr, brightness, 0, 100, 5, shown)) {
-            config.brightness = static_cast<u32>(brightness);
+            setting = static_cast<u32>(brightness);
         }
     }
     kit.tip(tr("In fullscreen, frame the 4:3 picture with an image from the bezels folder: <game>.png, "

@@ -372,8 +372,9 @@ Set in the **Video** tab and applied live:
   draws the 3D wider and keeps the 2D in the middle (experimental).
 - **Render scale:** draws the 3D at up to 8x native (GPU renderers only). The
   2D stays pixel-sharp.
-- **Brightness:** where the Model 2 picture's black sits, and the overall
-  brightness on Model 3; 50% is the default.
+- **Brightness:** where the Model 1/2 picture's black sits, and the overall
+  brightness on Model 3; 50% is the default. Model 1/2 and Model 3 each keep
+  their own setting (`brightness` and `brightness_model3`).
 - **Extended draw distance:** Daytona USA draws scenery to the edge of the
   course instead of the arcade's short range.
 - **Fullscreen resolution:** `fullscreen_resolution = 1280x720` in the ini (or

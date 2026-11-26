@@ -155,10 +155,14 @@ struct Config {
     u32  crt_glow_strength     = 20;
     u32  crt_curvature         = 0;
 
-    /// Picture brightness, 0..100: 50 is the arcade-fitted default, lower
-    /// darker. Model 1/2 move their colour ramp; Model 3 scales the output.
-    /// Live-switchable.
+    /// Model 1/2 picture brightness, 0..100: 50 is the arcade-fitted default,
+    /// lower darker. Moves the colour ramp's black level. Live-switchable.
     u32 brightness = 50;
+
+    /// Model 3 picture brightness, 0..100: 50 is the hardware's own level,
+    /// lower darker. Scales the output. Kept apart from Model 1/2's because the
+    /// two boards' neutral points differ. Live-switchable.
+    u32 brightness_model3 = 50;
 
     /// Bezel artwork in fullscreen.
     bool bezel = false;

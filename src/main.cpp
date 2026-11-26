@@ -1022,6 +1022,7 @@ int main(int argc, char** argv)
     options.config.aspect_mode           = from_file.aspect_mode;
     options.config.crt_enabled           = from_file.crt_enabled;
     options.config.brightness            = from_file.brightness;
+    options.config.brightness_model3     = from_file.brightness_model3;
     options.config.crt_scanline_strength = from_file.crt_scanline_strength;
     options.config.crt_mask_strength     = from_file.crt_mask_strength;
     options.config.crt_glow_strength     = from_file.crt_glow_strength;
@@ -3124,7 +3125,7 @@ int main(int argc, char** argv)
                 present.crt_glow_strength     = options.config.crt_glow_strength;
                 present.crt_curvature         = options.config.crt_curvature;
                 if (machine_m3) {
-                    present.gain = 0.5f + static_cast<float>(std::min(options.config.brightness, 100u)) / 100.0f;
+                    present.gain = 0.5f + static_cast<float>(std::min(options.config.brightness_model3, 100u)) / 100.0f;
                 }
                 backend->set_present_options(present);
 
