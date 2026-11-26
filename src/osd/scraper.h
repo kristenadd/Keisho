@@ -17,6 +17,7 @@
 #pragma once
 
 #include <atomic>
+#include <map>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -47,8 +48,9 @@ public:
         std::string manufacturer;
         std::string genre;
         std::string description;
-        /// Cached image paths in display order (flyer, title, ingame, marquee),
-        /// which the picker cycles through while a game is highlighted.
+        /// Cached image paths in display order, which the picker cycles
+        /// through while a game is highlighted: the SteamGridDB cover alone
+        /// when there is one, else ArcadeDB's flyer, title, ingame, marquee.
         std::vector<std::string> image_paths;
         bool found = false;  ///< true if ArcadeDB returned a record.
     };
@@ -61,7 +63,10 @@ public:
 
     /// Start the worker. No thread is started when disabled or built without
     /// libcurl; the picker then relies on the cache and games.xml titles alone.
-    void start(std::string artwork_dir, std::vector<Entry> entries, bool enabled);
+    /// A non-empty `steamgriddb_key` also fetches each game's vertical cover
+    /// from SteamGridDB, matched by title and year.
+    void start(std::string artwork_dir, std::vector<Entry> entries, bool enabled,
+               std::string steamgriddb_key = {});
 
     /// Stop and join the worker. Idempotent; bounded by the request timeout.
     void stop();
@@ -79,9 +84,19 @@ public:
 
 private:
     void run();
+    /// ArcadeDB text and images for `entry` unless cached. True if it wrote
+    /// a cache file. Worker thread.
+    bool fetch_arcadedb(const Entry& entry);
+    /// SteamGridDB's vertical cover for `entry`. True if it wrote a cache
+    /// file. `grid_by_title` maps a title+year already looked up to its
+    /// cached image ("" for none). Worker thread.
+    bool fetch_steamgriddb(const Entry& entry, std::map<std::string, std::string>* grid_by_title);
+    /// Whether `name` has a current SteamGridDB cache file.
+    [[nodiscard]] bool sgdb_cached(const std::string& name) const;
 
     std::string        m_artwork_dir;
     std::vector<Entry> m_entries;
+    std::string        m_sgdb_key;  ///< empty: SteamGridDB off
     bool               m_scraping = false;
 
     std::thread             m_thread;

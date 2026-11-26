@@ -1009,6 +1009,8 @@ int main(int argc, char** argv)
     }
     options.config.artwork_dir    = from_file.artwork_dir;
     options.config.scrape_artwork = from_file.scrape_artwork;
+    options.config.steamgriddb_api_key = from_file.steamgriddb_api_key;
+    options.config.hide_alternate_versions = from_file.hide_alternate_versions;
     if (!options.given.log_level) {
         options.config.log_level = from_file.log_level;
     }
@@ -2002,6 +2004,7 @@ int main(int argc, char** argv)
                 osd::Gui::PickerEntry entry;
                 entry.name   = game.name;
                 entry.title  = game.title;
+                entry.parent = game.parent;
                 entry.system = game.board == rom::Board::Model1 ? "Model 1"
                              : game.board == rom::Board::Model3 ? "Model 3"
                                                                 : "Model 2";
@@ -2019,7 +2022,7 @@ int main(int argc, char** argv)
             // move-assigns over a still-joinable worker thread.
             scraper.stop();
             scraper.start(options.config.artwork_dir, std::move(scrape_list),
-                          options.config.scrape_artwork);
+                          options.config.scrape_artwork, options.config.steamgriddb_api_key);
             gui.enable_picker(std::move(entries), backend.get(), &scraper);
         };
 
@@ -2233,11 +2236,12 @@ int main(int argc, char** argv)
         // What the game list is built from, as it was when the settings opened:
         // the list is rebuilt only when one of these changed there.
         const auto list_inputs = [&] {
-            return std::array<std::string, 4>{options.config.model2_rom_dir, options.config.model1_rom_dir,
+            return std::array<std::string, 5>{options.config.model2_rom_dir, options.config.model1_rom_dir,
                                               options.config.model3_rom_dir,
-                                              options.config.scrape_artwork ? "scrape" : ""};
+                                              options.config.scrape_artwork ? "scrape" : "",
+                                              options.config.steamgriddb_api_key};
         };
-        std::array<std::string, 4> list_inputs_at_open = list_inputs();
+        std::array<std::string, 5> list_inputs_at_open = list_inputs();
         // Fixed at launch by --graphics-backend software.
         const bool use_software_renderer = options.start_in_software_renderer;
         // 16:9 widens the frame only on a GPU renderer; elsewhere it shows 4:3.

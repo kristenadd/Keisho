@@ -49,6 +49,7 @@
 #include <span>
 #include <string_view>
 #include <system_error>
+#include <unordered_set>
 
 namespace sm2::osd {
 
@@ -1636,6 +1637,13 @@ void Gui::page_paths(ui::Kit& kit, Config& config)
     kit.tip(tr("Let the game list fetch box art and descriptions from ArcadeDB over the network. Off keeps "
                "Keisho offline: the list still launches every game, with plain tiles."));
     kit.toggle(tr("Fetch artwork online"), tr("Box art and descriptions from ArcadeDB."), config.scrape_artwork);
+    kit.tip(tr("A free key from steamgriddb.com (Preferences, API) adds each game's vertical cover from "
+               "SteamGridDB, matched by title and year. It is kept in keisho.ini. Leave empty to skip it."));
+    ui::RowOpts key_opts;
+    key_opts.password = true;
+    key_opts.disabled = !config.scrape_artwork;
+    kit.field(tr("SteamGridDB API key"), tr("Vertical covers for the game list."), config.steamgriddb_api_key,
+              tr("Paste your key"), nullptr, nullptr, key_opts);
     kit.end_group();
 
     kit.begin_group(tr("Keisho files"));
@@ -4709,6 +4717,14 @@ void Gui::poll_scraper_and_load_metadata()
             entry.description     = meta.description;
             entry.metadata_loaded = true;
             if (!meta.image_paths.empty()) {
+                // New pictures (a SteamGridDB cover after ArcadeDB's): drop
+                // what is uploaded and let the grid upload the new set.
+                if (m_picker_backend != nullptr) {
+                    for (const PickerEntry::Art1& art : entry.art) {
+                        if (art.handle != 0) m_picker_backend->destroy_texture(art.handle);
+                    }
+                }
+                entry.art.clear();
                 entry.art_state = PickerEntry::Art::Unknown;  // let the grid upload it
             }
             break;
@@ -4730,6 +4746,65 @@ namespace {
     pixels->assign(data, data + static_cast<usize>(*w) * static_cast<usize>(*h) * 4);
     stbi_image_free(data);
     return true;
+}
+
+/// Shrink RGBA8 `pixels` to fit inside max_w x max_h, keeping the aspect, with
+/// an area (box) filter: every source pixel counts toward the result, so a big
+/// image drawn small stays smooth instead of aliasing under bilinear sampling
+/// (picker textures have no mipmaps). Never enlarges.
+void downscale_to_fit(std::vector<unsigned char>* pixels, int* w, int* h, int max_w, int max_h)
+{
+    const int sw = *w, sh = *h;
+    if (sw <= 0 || sh <= 0 || max_w <= 0 || max_h <= 0 || (sw <= max_w && sh <= max_h)) {
+        return;
+    }
+    const double k  = std::min(static_cast<double>(max_w) / sw, static_cast<double>(max_h) / sh);
+    const int    dw = std::max(1, static_cast<int>(std::lround(sw * k)));
+    const int    dh = std::max(1, static_cast<int>(std::lround(sh * k)));
+    const double fx = static_cast<double>(sw) / dw;  // source pixels per output pixel
+    const double fy = static_cast<double>(sh) / dh;
+    const unsigned char* src = pixels->data();
+    std::vector<unsigned char> out(static_cast<usize>(dw) * static_cast<usize>(dh) * 4);
+
+    for (int y = 0; y < dh; ++y) {
+        const double y0 = y * fy, y1 = y0 + fy;
+        const int    iy0 = static_cast<int>(y0);
+        const int    iy1 = std::min(sh, static_cast<int>(std::ceil(y1)));
+        for (int x = 0; x < dw; ++x) {
+            const double x0 = x * fx, x1 = x0 + fx;
+            const int    ix0 = static_cast<int>(x0);
+            const int    ix1 = std::min(sw, static_cast<int>(std::ceil(x1)));
+            // Premultiply so transparent pixels do not bleed their colour.
+            double r = 0, g = 0, b = 0, a = 0, area = 0;
+            for (int sy = iy0; sy < iy1; ++sy) {
+                const double wy = std::min<double>(sy + 1, y1) - std::max<double>(sy, y0);
+                const unsigned char* row = src + (static_cast<usize>(sy) * static_cast<usize>(sw)) * 4;
+                for (int sx = ix0; sx < ix1; ++sx) {
+                    const double wx = std::min<double>(sx + 1, x1) - std::max<double>(sx, x0);
+                    const double wgt = wx * wy;
+                    const unsigned char* px = row + static_cast<usize>(sx) * 4;
+                    const double pa = px[3] * wgt;
+                    r += px[0] * pa;
+                    g += px[1] * pa;
+                    b += px[2] * pa;
+                    a += pa;
+                    area += wgt;
+                }
+            }
+            unsigned char* o = out.data() + (static_cast<usize>(y) * static_cast<usize>(dw) + static_cast<usize>(x)) * 4;
+            if (a > 0.0) {
+                o[0] = static_cast<unsigned char>(std::clamp(r / a + 0.5, 0.0, 255.0));
+                o[1] = static_cast<unsigned char>(std::clamp(g / a + 0.5, 0.0, 255.0));
+                o[2] = static_cast<unsigned char>(std::clamp(b / a + 0.5, 0.0, 255.0));
+            } else {
+                o[0] = o[1] = o[2] = 0;
+            }
+            o[3] = static_cast<unsigned char>(std::clamp(area > 0.0 ? a / area + 0.5 : 0.0, 0.0, 255.0));
+        }
+    }
+    pixels->swap(out);
+    *w = dw;
+    *h = dh;
 }
 
 }  // namespace
@@ -4774,10 +4849,22 @@ void Gui::draw_picker(Config& config)
     std::string needle = m_picker_search;
     std::transform(needle.begin(), needle.end(), needle.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    // Y on a pad flips "hide alternates" (the head's button does on touch
+    // and mouse). A clone hides only when its parent is listed, so a set
+    // owned only as a clone stays playable.
+    if (!m_load_error.has_value() && !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false)) {
+        config.hide_alternate_versions = !config.hide_alternate_versions;
+        m_picker_scroll_to_sel         = true;
+    }
+    std::unordered_set<std::string> listed;
+    if (config.hide_alternate_versions) {
+        for (const PickerEntry& e : m_picker_entries) listed.insert(e.name);
+    }
     std::vector<int> shown;  // indices into m_picker_entries, in the order drawn
     for (int i = 0; i < static_cast<int>(m_picker_entries.size()); ++i) {
         const PickerEntry& e = m_picker_entries[static_cast<usize>(i)];
         if (m_picker_system != 0 && e.system != kSystems[static_cast<usize>(m_picker_system)]) continue;
+        if (config.hide_alternate_versions && !e.parent.empty() && listed.count(e.parent) != 0) continue;
         if (!needle.empty()) {
             std::string hay = e.title + " " + e.name;
             std::transform(hay.begin(), hay.end(), hay.begin(),
@@ -4805,6 +4892,8 @@ void Gui::draw_picker(Config& config)
         const std::string count = trf("%zu of %zu", shown.size(), m_picker_entries.size());
         list->AddText(ImVec2(origin.x + margin + title_w + kit.px(10.0f), head_top + (head_h - font) * 0.5f),
                       p.faint, count.c_str());
+        const float count_end = origin.x + margin + title_w + kit.px(10.0f) + ImGui::CalcTextSize(count.c_str()).x;
+        float       alt_left  = origin.x + room.x;  // the left edge of "Hide alternates"
 
         // The settings cog at the far right, the search beside it.
         const float  cog_d = kit.px(26.0f);
@@ -4820,8 +4909,36 @@ void Gui::draw_picker(Config& config)
             if (hovered) tooltip(trf("Settings (%s)", hotkey_label(config, Config::Hotkey::Overlay)).c_str());
             if (pressed) show();
         }
-        const float  search_w = kit.px(230.0f);
+        // The search narrows (to a floor) before the systems would have to
+        // overlap the count or "Hide alternates".
+        float search_w = kit.px(230.0f);
+        if (!m_touch_ui) {
+            const float fixed = kit.segments_size(systems).x + kit.px(24.0f)
+                              + kit.button_size(tr("Hide alternates"), ui::Kit::Icon::Check).x + kit.px(16.0f);
+            const float spare = cog_at.x - count_end - fixed;
+            search_w          = std::clamp(spare, kit.px(120.0f), search_w);
+        }
         const ImVec2 search_at(cog_at.x - kit.px(8.0f) - search_w, head_top + (head_h - kit.px(26.0f)) * 0.5f);
+        // "Hide alternates" left of the search (of the cog on touch, where
+        // there is no search): lit with a check while on.
+        {
+            const char*  label = tr("Hide alternates");
+            const bool   on    = config.hide_alternate_versions;
+            const ImVec2 size  = kit.button_size(label, ui::Kit::Icon::Check);
+            const float  right = m_touch_ui ? cog_at.x : search_at.x;
+            const ImVec2 at(right - kit.px(8.0f) - size.x, head_top + std::floor((head_h - size.y) * 0.5f));
+            alt_left = at.x;
+            if (kit.button_at(label, at, on ? ui::Kit::Tone::Primary : ui::Kit::Tone::Plain,
+                              on ? ui::Kit::Icon::Check : ui::Kit::Icon::None)) {
+                config.hide_alternate_versions = !on;
+                m_picker_scroll_to_sel         = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                tooltip((io.BackendFlags & ImGuiBackendFlags_HasGamepad)
+                            ? tr("Show one version of each game: hides other revisions and regions (Y)")
+                            : tr("Show one version of each game: hides other revisions and regions"));
+            }
+        }
         // No search on a touch screen: it would need the on-screen keyboard.
         // The system tabs and scrolling find a game there.
         if (!m_touch_ui) {
@@ -4875,10 +4992,14 @@ void Gui::draw_picker(Config& config)
         }
         }  // !m_touch_ui
 
-        // The systems in the middle.
+        // The systems in the middle, moved left as needed to clear "Hide
+        // alternates" (but never over the count) when the window is narrow.
         const ImVec2 seg_size = kit.segments_size(systems);
-        const ImVec2 seg_at(std::floor(origin.x + (room.x - seg_size.x) * 0.5f),
-                            head_top + std::floor((head_h - seg_size.y) * 0.5f));
+        const float  gap      = kit.px(12.0f);
+        float        seg_x    = std::floor(origin.x + (room.x - seg_size.x) * 0.5f);
+        seg_x                 = std::min(seg_x, std::floor(alt_left - gap - seg_size.x));
+        seg_x                 = std::max(seg_x, std::floor(count_end + gap));
+        const ImVec2 seg_at(seg_x, head_top + std::floor((head_h - seg_size.y) * 0.5f));
         // Tapped or clicked; on a pad LB/RB change it, and the D-pad stays on
         // the games.
         int system = m_picker_system;
@@ -4912,13 +5033,13 @@ void Gui::draw_picker(Config& config)
         if (m_touch_ui) {
             // No keyboard: tap to play, or the pad's own buttons.
             hint = (io.BackendFlags & ImGuiBackendFlags_HasGamepad)
-                     ? std::string(tr("A: play")) + "   " + tr("LB/RB: pages")
+                     ? std::string(tr("A: play")) + "   " + tr("Y: alternates") + "   " + tr("LB/RB: pages")
                      : "";
         } else {
             hint = trf("Enter: play   %s: settings   %s: quit", hotkey_label(config, Config::Hotkey::Overlay),
                        hotkey_label(config, Config::Hotkey::Quit));
             if (io.BackendFlags & ImGuiBackendFlags_HasGamepad) {
-                hint = std::string(tr("A: play")) + "   " + tr("LB/RB: pages") + "   " + hint;
+                hint = std::string(tr("A: play")) + "   " + tr("Y: alternates") + "   " + tr("LB/RB: pages") + "   " + hint;
             }
         }
         const float w = ImGui::CalcTextSize(hint.c_str()).x;
@@ -5090,13 +5211,30 @@ void Gui::draw_picker(Config& config)
             }
             continue;
         }
+        // The art box in framebuffer pixels: what the textures are sized for.
+        const ImVec2 fb_scale = ImGui::GetIO().DisplayFramebufferScale;
+        const float  box_w = std::max(1.0f, (tile_w - kit.px(8.0f)) * (fb_scale.x > 0.0f ? fb_scale.x : 1.0f));
+        const float  box_h = std::max(1.0f, (art_h - kit.px(6.0f)) * (fb_scale.y > 0.0f ? fb_scale.y : 1.0f));
+        if (entry.art_state == PickerEntry::Art::Loaded && m_picker_backend != nullptr
+            && (box_h > entry.art_box_h * 1.25f || box_h < entry.art_box_h * 0.6f)) {
+            // The tile changed size a lot (window resize, UI scale): resample.
+            for (const PickerEntry::Art1& old : entry.art) {
+                if (old.handle != 0) m_picker_backend->destroy_texture(old.handle);
+            }
+            entry.art.clear();
+            entry.art_state = PickerEntry::Art::Unknown;
+        }
         if (entry.art_state == PickerEntry::Art::Unknown && m_picker_backend != nullptr && m_picker_scraper != nullptr) {
             const Scraper::Metadata meta = m_picker_scraper->load_metadata(entry.name, entry.title);
+            entry.art_box_w = box_w;
+            entry.art_box_h = box_h;
             for (const std::string& image_path : meta.image_paths) {
                 int                        iw = 0;
                 int                        ih = 0;
                 std::vector<unsigned char> rgba;
                 if (decode_image_rgba(image_path, &iw, &ih, &rgba) && iw > 0 && ih > 0) {
+                    downscale_to_fit(&rgba, &iw, &ih, static_cast<int>(std::ceil(box_w)),
+                                     static_cast<int>(std::ceil(box_h)));
                     const render::Backend::TextureHandle handle = m_picker_backend->create_texture(
                         static_cast<u32>(iw), static_cast<u32>(ih), rgba.data());
                     if (handle != 0) {

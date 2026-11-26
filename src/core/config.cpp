@@ -1075,6 +1075,12 @@ bool load_config(const std::string& path, Config* out, std::vector<std::string>*
             out->bezel_dir = value;
         } else if (key == "crosshair_dir") {
             out->crosshair_dir = value;
+        } else if (key == "hide_alternate_versions") {
+            if (!parse_bool(value, &out->hide_alternate_versions)) {
+                bad_value();
+            }
+        } else if (key == "steamgriddb_api_key") {
+            out->steamgriddb_api_key = value;
         } else if (key == "scrape_artwork") {
             if (!parse_bool(value, &out->scrape_artwork)) {
                 bad_value();
@@ -1211,6 +1217,8 @@ bool save_config(const std::string& path, const Config& config)
         << "bezel_dir = " << config.bezel_dir << "\n"
         << "crosshair_dir = " << config.crosshair_dir << "\n"
         << "scrape_artwork = " << bool_text(config.scrape_artwork) << "\n"
+        << "steamgriddb_api_key = " << config.steamgriddb_api_key << "\n"
+        << "hide_alternate_versions = " << bool_text(config.hide_alternate_versions) << "\n"
         << "\n[wheel]\n"
         << "wheel_steer_degrees = " << config.wheel_steer_degrees << "\n"
         << "wheel_lock_degrees = " << config.wheel_lock_degrees << "\n"

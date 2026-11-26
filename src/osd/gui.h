@@ -260,6 +260,7 @@ public:
         std::string name;   ///< MAME short name: launch key + cache key.
         std::string title;
         std::string system; ///< "Model 1", "Model 2" or "Model 3": the list groups by it
+        std::string parent; ///< the set this is a clone of; empty for a parent
         std::string year;
         std::string manufacturer;
         std::string description;
@@ -274,6 +275,10 @@ public:
         /// Artwork in display order; the highlighted game cycles through it.
         std::vector<Art1> art;
         enum class Art { Unknown, Loaded, None } art_state = Art::Unknown;
+        /// Framebuffer-pixel box the art was downscaled for; the grid reloads
+        /// it when the tile grows or shrinks well past this.
+        float art_box_w = 0.0f;
+        float art_box_h = 0.0f;
         bool metadata_loaded = false;
     };
 

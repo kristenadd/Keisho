@@ -32,6 +32,7 @@ struct RowOpts {
     const char* id       = nullptr; ///< ImGui ID when the name repeats in a group
     const char* badge    = nullptr; ///< a short word after the name, e.g. "next launch"
     bool        read_only = false;  ///< field(): shown, not typed into (no on-screen keyboard)
+    bool        password  = false;  ///< field(): the text drawn as dots
 };
 
 /// Where keyboard and gamepad focus is among the kit's rows, kept by the owner

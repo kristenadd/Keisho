@@ -1099,8 +1099,10 @@ bool Kit::field(const char* name, const char* about, std::string& text, const ch
     if (!opts.disabled) nav_row(false);
     if (opts.disabled) ImGui::BeginDisabled();
     if (ImGui::InputTextWithHint("##f", hint != nullptr ? hint : "", buf, sizeof buf,
-                                 (opts.read_only || g_touch_only) ? ImGuiInputTextFlags_ReadOnly
-                                                                  : ImGuiInputTextFlags_None)) {
+                                 ((opts.read_only || g_touch_only) ? ImGuiInputTextFlags_ReadOnly
+                                                                   : ImGuiInputTextFlags_None)
+                                     | (opts.password ? ImGuiInputTextFlags_Password
+                                                      : ImGuiInputTextFlags_None))) {
         text    = buf;
         changed = true;
     }

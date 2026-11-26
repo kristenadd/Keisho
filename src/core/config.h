@@ -570,6 +570,12 @@ struct Config {
     /// Let the game picker fetch art/descriptions from ArcadeDB. Off keeps
     /// Keisho offline; the picker still lists and launches every game.
     bool scrape_artwork = true;
+    /// A SteamGridDB API key: when set, the picker also fetches each game's
+    /// vertical cover from SteamGridDB. Empty leaves SteamGridDB alone.
+    std::string steamgriddb_api_key;
+    /// The game list hides clones (other revisions and regions) whose parent
+    /// it lists. Off by default: every launchable set shows.
+    bool hide_alternate_versions = false;
 
     // -- diagnostics -------------------------------------------------------
 
