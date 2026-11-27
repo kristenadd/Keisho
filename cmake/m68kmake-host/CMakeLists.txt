@@ -12,6 +12,8 @@ add_executable(m68kmake "${SM2_M68KMAKE_SRC}")
 set_target_properties(m68kmake PROPERTIES C_STANDARD 99)
 if(MSVC)
     target_compile_definitions(m68kmake PRIVATE _CRT_SECURE_NO_WARNINGS)
+    # MSVC /O2 (19.44) drops bit 14 in m68kmake's mask table, crashing m68k_execute.
+    target_compile_options(m68kmake PRIVATE /Od)
 else()
     target_compile_options(m68kmake PRIVATE -w)
 endif()

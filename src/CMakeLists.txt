@@ -391,6 +391,7 @@ add_library(sm2_osd STATIC
     osd/indy_board.cpp
     osd/input.cpp
     osd/scraper.cpp
+    osd/touch_gamepad.cpp
     osd/ui_text.cpp
     osd/ui/kit.cpp
     osd/ui/theme.cpp
@@ -405,6 +406,9 @@ if(SM2_PLATFORM_IOS)
     target_link_libraries(sm2_osd PRIVATE "-framework UIKit" "-framework UniformTypeIdentifiers")
 else()
     target_sources(sm2_osd PRIVATE osd/folder_picker_none.cpp)
+endif()
+if(SM2_PLATFORM_ANDROID)
+    target_sources(sm2_osd PRIVATE osd/android_platform.cpp)
 endif()
 # The host's application menu: a "Settings..." item on macOS, nothing elsewhere.
 if(SM2_PLATFORM_MACOS)
@@ -474,9 +478,17 @@ endif()
 # Keisho — the executable
 # ---------------------------------------------------------------------------
 
-add_executable(keisho
-    main.cpp
-)
+if(SM2_PLATFORM_ANDROID)
+    add_library(main SHARED
+        main.cpp
+    )
+    set(SM2_APP_TARGET main)
+else()
+    add_executable(keisho
+        main.cpp
+    )
+    set(SM2_APP_TARGET keisho)
+endif()
 
 # Apple Vision Pro: the window's shape and the stereo layer. The Swift is a
 # library of its own, away from the C++ targets' preprocessor definitions,
@@ -514,7 +526,7 @@ set(SM2_BUILD_NUMBER "${PROJECT_VERSION}" CACHE STRING "Build number (CFBundleVe
 # On macOS build a .app bundle so Finder and the Dock show the icon.
 if(SM2_PLATFORM_MACOS)
     set(SM2_MACOS_ICNS "${CMAKE_SOURCE_DIR}/data/icons/keisho.icns")
-    set_target_properties(keisho PROPERTIES
+    set_target_properties(${SM2_APP_TARGET} PROPERTIES
         OUTPUT_NAME   "Keisho"
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_INFO_PLIST      "${CMAKE_SOURCE_DIR}/cmake/Info.plist.in"
@@ -525,7 +537,7 @@ if(SM2_PLATFORM_MACOS)
         MACOSX_BUNDLE_ICON_FILE       "keisho.icns")
     # Package the icns and the ROM database into Contents/Resources so the
     # bundle is self-contained.
-    target_sources(keisho PRIVATE
+    target_sources(${SM2_APP_TARGET} PRIVATE
         "${SM2_MACOS_ICNS}"
         "${CMAKE_SOURCE_DIR}/data/games.xml")
     set_source_files_properties(
@@ -534,12 +546,12 @@ if(SM2_PLATFORM_MACOS)
         PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
     # The overlay's translations, in Contents/Resources/lang.
     file(GLOB SM2_LANG_FILES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/data/lang/*.po")
-    target_sources(keisho PRIVATE ${SM2_LANG_FILES})
+    target_sources(${SM2_APP_TARGET} PRIVATE ${SM2_LANG_FILES})
     set_source_files_properties(${SM2_LANG_FILES}
         PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/lang")
     # Fonts for scripts a system may lack, in Contents/Resources/lang/fonts.
     file(GLOB SM2_LANG_FONTS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/data/lang/fonts/*")
-    target_sources(keisho PRIVATE ${SM2_LANG_FONTS})
+    target_sources(${SM2_APP_TARGET} PRIVATE ${SM2_LANG_FONTS})
     set_source_files_properties(${SM2_LANG_FONTS}
         PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/lang/fonts")
 elseif(SM2_PLATFORM_IOS)
@@ -622,6 +634,11 @@ elseif(SM2_PLATFORM_IOS)
         list(APPEND SM2_IOS_ICONS "${sm2_icon_out}")
     endforeach()
 elseif(SM2_PLATFORM_WINDOWS)
+    # No console window on launch; keep int main().
+    if(MSVC)
+        set_target_properties(keisho PROPERTIES WIN32_EXECUTABLE TRUE)
+        target_link_options(keisho PRIVATE "/ENTRY:mainCRTStartup")
+    endif()
     # Compile the .ico into the .exe so Explorer and the taskbar show it. The
     # running window's icon is set in osd/window.cpp.
     set(SM2_WIN_ICON "${CMAKE_SOURCE_DIR}/data/icons/keisho.ico")
@@ -629,17 +646,17 @@ elseif(SM2_PLATFORM_WINDOWS)
         "${CMAKE_SOURCE_DIR}/cmake/keisho.rc.in"
         "${CMAKE_BINARY_DIR}/keisho.rc"
         @ONLY)
-    target_sources(keisho PRIVATE "${CMAKE_BINARY_DIR}/keisho.rc")
+    target_sources(${SM2_APP_TARGET} PRIVATE "${CMAKE_BINARY_DIR}/keisho.rc")
     # Delay-load the Vulkan loader: an old or missing vulkan-1.dll lacks the
     # 1.3 exports and would stop the exe starting, even for OpenGL/software.
     if(MSVC AND SM2_BUILD_VULKAN)
-        target_link_options(keisho PRIVATE "/DELAYLOAD:vulkan-1.dll")
-        target_link_libraries(keisho PRIVATE delayimp)
+        target_link_options(${SM2_APP_TARGET} PRIVATE "/DELAYLOAD:vulkan-1.dll")
+        target_link_libraries(${SM2_APP_TARGET} PRIVATE delayimp)
     endif()
 endif()
 # sm2_core, sm2_cpu and sm2_rom come in PUBLIC through sm2_osd and sm2_hw;
 # naming them again makes the linker warn about duplicate archives.
-target_link_libraries(keisho
+target_link_libraries(${SM2_APP_TARGET}
     PRIVATE
         sm2_osd
         sm2_render
@@ -648,29 +665,37 @@ target_link_libraries(keisho
         sm2_machines
         sm2_warnings
 )
+if(SM2_PLATFORM_ANDROID)
+    target_link_libraries(${SM2_APP_TARGET} PRIVATE android log)
+    if(SM2_BUILD_OPENGL_ES)
+        target_link_libraries(${SM2_APP_TARGET} PRIVATE GLESv3)
+    endif()
+    target_link_libraries(sm2_core PUBLIC log)
+endif()
 if(SM2_BUILD_VULKAN)
-    target_link_libraries(keisho PRIVATE sm2_render_vk)
+    target_link_libraries(${SM2_APP_TARGET} PRIVATE sm2_render_vk)
 endif()
 if(SM2_BUILD_OPENGL_DESKTOP OR SM2_BUILD_OPENGL_ES)
-    target_link_libraries(keisho PRIVATE sm2_render_gl)
+    target_link_libraries(${SM2_APP_TARGET} PRIVATE sm2_render_gl)
 endif()
 
-target_compile_definitions(keisho PRIVATE
+target_compile_definitions(${SM2_APP_TARGET} PRIVATE
     $<$<BOOL:${SM2_BUILD_VULKAN}>:SM2_HAVE_VULKAN=1>
     $<$<BOOL:${SM2_BUILD_OPENGL_DESKTOP}>:SM2_HAVE_OPENGL_DESKTOP=1>
     $<$<BOOL:${SM2_BUILD_OPENGL_ES}>:SM2_HAVE_OPENGL_ES=1>
 )
 
 # Keep games.xml beside the binary so a freshly built tree runs as is. The
-# macOS bundle carries it in Contents/Resources instead.
-if(NOT SM2_PLATFORM_MACOS)
-    add_custom_command(TARGET keisho POST_BUILD
+# macOS bundle carries it in Contents/Resources instead, and Android stages
+# them into APK assets via Gradle.
+if(NOT SM2_PLATFORM_MACOS AND NOT SM2_PLATFORM_ANDROID)
+    add_custom_command(TARGET ${SM2_APP_TARGET} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_SOURCE_DIR}/data/games.xml"
-                "$<TARGET_FILE_DIR:keisho>/games.xml"
+                "$<TARGET_FILE_DIR:${SM2_APP_TARGET}>/games.xml"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_SOURCE_DIR}/data/lang"
-                "$<TARGET_FILE_DIR:keisho>/lang"
+                "$<TARGET_FILE_DIR:${SM2_APP_TARGET}>/lang"
         COMMENT "Staging games.xml and translations"
         VERBATIM
     )
@@ -731,7 +756,7 @@ if(SM2_PLATFORM_IOS)
 endif()
 
 target_compile_definitions(sm2_osd PRIVATE SM2_VERSION="${PROJECT_VERSION}")
-target_compile_definitions(keisho PRIVATE
+target_compile_definitions(${SM2_APP_TARGET} PRIVATE
     SM2_VERSION="${PROJECT_VERSION}"
     $<$<BOOL:${SM2_ENABLE_VALIDATION}>:SM2_ENABLE_VALIDATION=1>
 )
@@ -743,7 +768,7 @@ if(SM2_PLATFORM_MACOS AND SM2_BUILD_VULKAN)
     get_target_property(sm2_vulkan_library Vulkan::Vulkan IMPORTED_LOCATION)
     if(sm2_vulkan_library)
         get_filename_component(sm2_vulkan_dir "${sm2_vulkan_library}" DIRECTORY)
-        set_target_properties(keisho PROPERTIES
+        set_target_properties(${SM2_APP_TARGET} PROPERTIES
             BUILD_RPATH   "${sm2_vulkan_dir}"
             INSTALL_RPATH "${sm2_vulkan_dir}")
     endif()
@@ -761,6 +786,7 @@ endif()
 # plus the desktop-integration icons per platform (below). The in-window icon
 # is compiled in (src/osd/app_icon.h).
 
+if(NOT SM2_PLATFORM_ANDROID)
 include(GNUInstallDirs)
 
 set(SM2_ICON_DIR "${CMAKE_SOURCE_DIR}/data/icons")
@@ -805,6 +831,7 @@ if(SM2_PLATFORM_LINUX)
         @ONLY)
     install(FILES "${CMAKE_BINARY_DIR}/keisho.desktop"
             DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+endif()
 endif()
 
 # macOS needs nothing extra here: the icon (keisho.icns) and games.xml are

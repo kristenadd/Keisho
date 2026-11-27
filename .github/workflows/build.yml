@@ -2,10 +2,11 @@ name: Build
 
 # Builds Keisho on every push/PR to main (catches build breaks early) and
 # packages release artifacts on every run: a Linux x86_64 AppImage + tarball,
-# a Linux aarch64 AppImage + tarball, and a macOS dmg. Pushing a `v*` tag
-# publishes those five artifacts to a proper GitHub Release. A plain push to
-# main (no tag) instead updates a single rolling "dev" pre-release in place,
-# so there is always exactly one downloadable link to the latest main build.
+# a Linux aarch64 AppImage + tarball, a macOS dmg, a Windows zip, and an Android
+# arm64-v8a APK. Pushing a `v*` tag publishes those artifacts to a proper
+# GitHub Release. A plain push to main (no tag) instead updates a single rolling
+# "dev" pre-release in place, so there is always exactly one downloadable link
+# to the latest main build.
 on:
   push:
     branches: [ main ]
@@ -327,9 +328,9 @@ jobs:
       - name: Smoke test
         run: |
           $exe = "keisho-${{ env.VERSION }}-windows-x86_64\keisho.exe"
-          & $exe --help
+          & $exe --help | Out-Host
           if ($LASTEXITCODE -ne 0) { throw "keisho --help exited $LASTEXITCODE" }
-          & $exe --list-games
+          & $exe --list-games | Out-Host
           if ($LASTEXITCODE -ne 0) { throw "keisho --list-games exited $LASTEXITCODE" }
 
       - name: Build zip
@@ -344,12 +345,73 @@ jobs:
           path: out/keisho-${{ env.VERSION }}-windows-x86_64.zip
 
   # ---------------------------------------------------------------------
+  # Android (arm64-v8a)
+  # ---------------------------------------------------------------------
+  android:
+    name: Android arm64-v8a (apk)
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        run: rm -f 3rdparty/SDL/android-project/gradle/wrapper/gradle-wrapper.jar
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: git -C 3rdparty/SDL checkout -- android-project/gradle/wrapper/gradle-wrapper.jar
+
+      - name: Install Android NDK and CMake
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -n1)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;29.0.14206865" \
+            "cmake;3.31.6"
+          printf 'sdk.dir=%s\n' "$SDK_ROOT" > android/local.properties
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --console=plain
+
+      - name: Verify 16 KB alignment and package APK
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          "$SDK_ROOT/build-tools/35.0.0/zipalign" -c -P 16 4 \
+            android/app/build/outputs/apk/release/app-release.apk
+          mkdir -p out
+          cp android/app/build/outputs/apk/release/app-release.apk \
+             "out/keisho-${VERSION}-android-arm64.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keisho-android-arm64-apk
+          path: out/keisho-${{ env.VERSION }}-android-arm64.apk
+
+  # ---------------------------------------------------------------------
   # Tag push only: gather the artifacts above onto a GitHub Release.
   # ---------------------------------------------------------------------
   release:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [ linux-x86_64, linux-aarch64, macos, windows-x86_64 ]
+    needs: [ linux-x86_64, linux-aarch64, macos, windows-x86_64, android ]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -369,6 +431,7 @@ jobs:
             artifacts/keisho-linux-aarch64-tarball/*
             artifacts/keisho-macos-dmg/*
             artifacts/keisho-windows-x86_64-zip/*
+            artifacts/keisho-android-arm64-apk/*
 
   # ---------------------------------------------------------------------
   # Plain push to main (no tag): roll a single "dev" pre-release forward to
@@ -377,7 +440,7 @@ jobs:
   dev-release:
     name: Publish rolling dev pre-release
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: [ linux-x86_64, linux-aarch64, macos, windows-x86_64 ]
+    needs: [ linux-x86_64, linux-aarch64, macos, windows-x86_64, android ]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -417,6 +480,8 @@ jobs:
              artifacts/keisho-linux-aarch64-tarball/keisho-linux-aarch64.tar.gz
           mv artifacts/keisho-windows-x86_64-zip/*.zip \
              artifacts/keisho-windows-x86_64-zip/keisho-windows-x86_64.zip
+          mv artifacts/keisho-android-arm64-apk/*.apk \
+             artifacts/keisho-android-arm64-apk/keisho-android-arm64.apk
 
       - name: Publish dev pre-release
         uses: softprops/action-gh-release@v2
@@ -432,3 +497,4 @@ jobs:
             artifacts/keisho-linux-aarch64-tarball/*
             artifacts/keisho-macos-dmg/*
             artifacts/keisho-windows-x86_64-zip/*
+            artifacts/keisho-android-arm64-apk/*

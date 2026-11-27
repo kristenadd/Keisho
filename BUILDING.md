@@ -502,3 +502,38 @@ recursive checkout cross-compiles with no network access:
 
 The Musashi 68000 core and the ymfm FM library always come from `3rdparty/`,
 having no system-package form.
+
+## Android (`arm64-v8a`)
+
+The Gradle project under `android/` drives CMake against the Android NDK
+(`compileSdk 35`, `minSdk 24`, `ndkVersion 29.0.14206865` for full C++20 libc++ support) and syncs SDL 3.4.14
+Java bindings from `3rdparty/SDL/android-project` at build time. Every native dependency
+builds offline from `3rdparty/`, and `glslc` is located automatically inside
+the NDK's `shader-tools/` folder (or from `VULKAN_SDK` / `PATH`).
+
+Gradle passes:
+
+- `-DANDROID_PLATFORM=android-24` and `-DANDROID_STL=c++_static`
+- `-DSM2_BUILD_OPENGL_DESKTOP=OFF -DSM2_BUILD_OPENGL_ES=ON -DSM2_BUILD_VULKAN=ON`
+- `-DSM2_BUILD_TESTS=OFF`
+- 16 KB ELF page alignment (`-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384`) and `useLegacyPackaging = false`
+
+Build steps:
+
+1. Ensure submodules are initialised (`git submodule update --init --recursive`).
+2. Create `android/local.properties` with `sdk.dir=/path/to/Android/Sdk` (ignored by git).
+   On Windows, the CMake host build for `m68kmake` uses Visual Studio 2022 if `cl`/`gcc`
+   is not already on `PATH`.
+3. Build with JDK 17+:
+
+```sh
+cd android
+./gradlew assembleRelease        # Windows: .\gradlew.bat assembleRelease --console=plain
+```
+
+4. Output APK: `android/app/build/outputs/apk/release/app-release.apk`. Verify 16 KB ZIP alignment and install with:
+
+```sh
+zipalign -c -v -P 16 4 android/app/build/outputs/apk/release/app-release.apk
+adb install -r android/app/build/outputs/apk/release/app-release.apk
+```

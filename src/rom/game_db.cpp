@@ -16,6 +16,7 @@
 //
 #include "rom/game_db.h"
 
+#include "core/config.h"
 #include "core/log.h"
 
 #include <pugixml.hpp>
@@ -508,6 +509,11 @@ std::optional<std::string> GameDatabase::locate()
 {
     std::vector<std::filesystem::path> candidates;
 
+#if defined(__ANDROID__)
+    if (!android_assets_directory().empty()) {
+        candidates.push_back(std::filesystem::path(android_assets_directory()) / "games.xml");
+    }
+#endif
     candidates.emplace_back("games.xml");
     candidates.emplace_back("data/games.xml");
 

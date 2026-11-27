@@ -179,6 +179,9 @@ public:
     /// How many gamepads are open, for the settings UI to report.
     [[nodiscard]] usize pad_count() const { return m_pads.size(); }
 
+    /// True when any physical gamepad or wheel is connected.
+    [[nodiscard]] bool has_controller() const { return !m_pads.empty() || m_wheel.handle != nullptr; }
+
     /// The lowest-numbered wheel button currently held, or -1 if none. The
     /// button-binding UI polls this to capture "press the button for X".
     [[nodiscard]] s32 pressed_wheel_button() const;
@@ -306,6 +309,12 @@ public:
 
     void set_pad_aim_centred(bool centred) { m_pad_aim_centred = centred; }
 
+    /// Light-gun stick aiming speed/response in percent (25..300), pushed each frame.
+    void set_pad_aim_sensitivity(u32 percent)
+    {
+        m_pad_aim_sensitivity = static_cast<float>(std::clamp(percent, 25u, 300u)) / 100.0f;
+    }
+
     /// Gamepad rumble settings, pushed from the GUI/config each frame.
     void set_pad_rumble(bool enabled, u32 strength, bool cornering)
     {
@@ -414,6 +423,16 @@ public:
     /// Describe the bindings, for the help text.
     static void print_bindings();
 
+    /// Virtual on-screen gamepad state (merged into Player 1 when active).
+    void set_virtual_active(bool active) { m_virtual.active = active; }
+    void set_virtual_button(SDL_GamepadButton button, bool down);
+    void set_virtual_axis(SDL_GamepadAxis axis, s16 value);
+    void set_virtual_operator(bool service, bool test);
+    void set_virtual_touch_aim(bool active, bool engaged, float norm_x, float norm_y,
+                               bool trigger, float screen_w, float screen_h);
+    void clear_virtual_pad();
+    void set_suppress_touch_pointer(bool suppress) { m_virtual.suppress_pointer = suppress; }
+
 private:
     /// One open gamepad and the player it drives.
     struct Pad {
@@ -430,12 +449,13 @@ private:
         /// Guide is down, and no other button has been pressed since it went down.
         bool           guide_down = false;
         bool           guide_solo = false;
+        bool           is_virtual       = false;
     };
 
     /// Whether the game sees this pad: not while it is in a shortcut.
     [[nodiscard]] static bool plays(const Pad& pad)
     {
-        return pad.handle != nullptr && pad.shortcut_claimed == 0;
+        return (pad.handle != nullptr || pad.is_virtual) && pad.shortcut_claimed == 0;
     }
 
     /// A steering wheel, opened through the joystick API because a wheel has no
@@ -512,7 +532,18 @@ private:
     /// The pad driving a given player, or nullptr if that player has none.
     [[nodiscard]] SDL_Gamepad* pad_for(u32 player) const;
 
+    [[nodiscard]] bool has_pad_for(u32 player) const
+    {
+        return pad_for(player) != nullptr || (player == 0 && m_virtual.active);
+    }
+
+    [[nodiscard]] bool read_pad_button(u32 player, SDL_Gamepad* pad, SDL_GamepadButton button) const;
+    [[nodiscard]] s16  read_pad_axis(u32 player, SDL_Gamepad* pad, SDL_GamepadAxis axis) const;
+
+    [[nodiscard]] std::vector<Pad> effective_pads() const;
+
     /// Whether `binding` is held on `pad`: a button, or an axis past half travel.
+    [[nodiscard]] bool binding_held_for(u32 player, SDL_Gamepad* pad, s32 binding) const;
     [[nodiscard]] static bool binding_held(SDL_Gamepad* pad, s32 binding);
 
     /// Whether the pad's `physical` button is held, read through the user's
@@ -597,9 +628,10 @@ private:
     /// once on the press edge rather than every frame the trigger is held.
     /// Sized to LightGuns::kMaxGuns (which is forward-declared here) plus slack.
     static constexpr usize kMaxGuns = 8;
-    bool                             m_recoil_enabled  = true;
-    bool                             m_pad_aim_centred = false;
-    u32                              m_recoil_strength = 60;
+    bool                             m_recoil_enabled     = true;
+    bool                             m_pad_aim_centred    = false;
+    float                            m_pad_aim_sensitivity = 1.0f;
+    u32                              m_recoil_strength    = 60;
 
     /// The drive board's current force command, and Sega Rally's chop setting:
     /// 0 is off, n chops the torque with a period of 2^(n+2) board ticks.
@@ -655,6 +687,23 @@ private:
     ScalingMethod m_present_method = ScalingMethod::SharpBilinear;
     render::PictureArea m_present_area;
     bool          m_sinden_border  = false;
+
+    struct VirtualPad {
+        bool                                       active = false;
+        bool                                       service = false;
+        bool                                       test = false;
+        std::array<bool, SDL_GAMEPAD_BUTTON_COUNT> buttons{};
+        std::array<s16, SDL_GAMEPAD_AXIS_COUNT>    axes{};
+        bool                                       suppress_pointer = false;
+        bool                                       touch_aim_active = false;
+        bool                                       touch_aim_engaged = false;
+        bool                                       touch_aim_trigger = false;
+        float                                      touch_aim_x = 0.5f;
+        float                                      touch_aim_y = 0.5f;
+        float                                      touch_screen_w = 0.0f;
+        float                                      touch_screen_h = 0.0f;
+    };
+    VirtualPad m_virtual;
 
     bool             m_started = false;
 };

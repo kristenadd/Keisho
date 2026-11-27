@@ -15,6 +15,7 @@
 // that licence. See LICENSE and NOTICE.
 //
 #include "osd/i18n.h"
+#include "core/config.h"
 #include "core/log.h"
 #include "core/types.h"
 
@@ -769,7 +770,14 @@ void init()
     s.languages.clear();
     s.dir.clear();
 
-    std::vector<std::filesystem::path> candidates = {"lang", "data/lang"};
+    std::vector<std::filesystem::path> candidates;
+#if defined(__ANDROID__)
+    if (!android_assets_directory().empty()) {
+        candidates.push_back(std::filesystem::path(android_assets_directory()) / "lang");
+    }
+#endif
+    candidates.emplace_back("lang");
+    candidates.emplace_back("data/lang");
     if (const char* base = SDL_GetBasePath(); base != nullptr) {
         const std::filesystem::path exe_dir(base);
         candidates.push_back(exe_dir / "lang");

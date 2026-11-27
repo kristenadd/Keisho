@@ -122,6 +122,7 @@ choice there, and the only one that widens 2D backgrounds in 16:9.
 | **iOS (iPhone, iPad)** | iOS 16 or newer. No JIT is allowed, so Model 3 runs on the PowerPC interpreter; A17 Pro, M-series and newer chips are in the 2-3.6x-real-time range per core. A game controller is required. |
 | **visionOS (Apple Vision Pro)** | visionOS 26.5 or newer. As iOS, plus a resizable window and optional stereoscopic 3D. |
 | **ARM (SBCs, handhelds)** | A **Raspberry Pi 5** or better. The Pi 5 runs most Model 1 and 2 games at full speed; the heaviest Model 2B/2C games run just below it. Model 3 games run below full speed on a Pi 5, mostly at 42-56 fps at 1080p. |
+| **Android (`arm64-v8a`)** | Android 7.0+ (API 24+, Vulkan 1.3 or OpenGL ES 3.1, or software renderer). Includes an adaptive on-screen touch gamepad (with direct-touch or fixed-stick light-gun aiming), physical BT/USB gamepad support, per-model folders/filters, and frontend intent/CLI launch ([EN](docs/MANUAL_ANDROID_EN.md) / [PT-PT](docs/MANUAL_ANDROID_PT.md)). |
 
 On a Raspberry Pi 5 with the software renderer, Virtua Fighter 2, Daytona USA,
 Sega Rally and Manx TT run comfortably above 57.5 Hz. House of the Dead,
@@ -162,8 +163,8 @@ finished screen-space triangles.
 ## Building
 
 See [BUILDING.md](BUILDING.md) for dependencies, CMake options, the three
-graphics backends, per-distro packages, macOS, iOS, visionOS and
-cross-compiling for ARM.
+graphics backends, per-distro packages, macOS, iOS, visionOS, Windows, Android
+and cross-compiling for ARM.
 
 A default Linux build (software + OpenGL):
 
@@ -174,6 +175,48 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build
 ```
+
+### Android APK (`arm64-v8a`)
+
+Requirements:
+
+- **JDK 17+** (or Android Studio's bundled JBR)
+- **Android SDK** (`compileSdk 35`, `minSdk 24`) with **NDK `29.0.14206865`** (r29+, for full C++20 `std::atomic_ref` support) and **CMake 3.24+** + Ninja
+- Submodules initialised (`git submodule update --init --recursive`) — SDL3 (Java files synced from `3rdparty/SDL` 3.4.14 at build time), Dear ImGui, pugixml, miniz, LZMA SDK, stb_image, HarfBuzz, SheenBidi, VMA, Musashi and ymfm build from `3rdparty/`, and `glslc` comes from the NDK or `PATH`
+
+Create `android/local.properties` pointing to your Android SDK (and CMake if outside SDK):
+
+```properties
+sdk.dir=/path/to/Android/Sdk
+# Optional if using a standalone CMake 3.24+ instead of the SDK's copy:
+# cmake.dir=/path/to/cmake
+```
+
+Build the APK with Gradle (`Vulkan` + `OpenGL ES 3.1` + `software` are enabled by default in `android/app/build.gradle`, with 16 KB ELF page alignment):
+
+```sh
+# Linux / macOS
+cd android
+./gradlew assembleRelease
+```
+
+```powershell
+# Windows (PowerShell, using Android Studio's JBR)
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
+cd android
+.\gradlew.bat assembleRelease --console=plain
+```
+
+Output APK: `android/app/build/outputs/apk/release/app-release.apk`.
+
+To verify 16 KB alignment and install over USB:
+
+```sh
+zipalign -c -v -P 16 4 android/app/build/outputs/apk/release/app-release.apk
+adb install -r android/app/build/outputs/apk/release/app-release.apk
+```
+
+See [docs/MANUAL_ANDROID_EN.md](docs/MANUAL_ANDROID_EN.md) (and the Portuguese PT-PT guide: [docs/MANUAL_ANDROID_PT.md](docs/MANUAL_ANDROID_PT.md)) for Android configuration, light-gun touch modes, `filters.ini` and frontend launch examples (RetroFeVLC, Daijishō, ES-DE, Pegasus).
 
 ## Running
 
@@ -346,14 +389,18 @@ by default.
 
 Most settings are in the settings menu (`F10`) and in `keisho.ini`, which is
 created on first run. The file is looked for in the working directory, then in
-the config folder (`$XDG_CONFIG_HOME/keisho` on Linux,
-`~/Library/Application Support/Keisho` on macOS); `--config <dir>` overrides
-both. Menu changes are saved on exit, and command-line options always win.
+the config folder (`%APPDATA%\keisho` on Windows, `$XDG_CONFIG_HOME/keisho` on
+Linux, `~/Library/Application Support/Keisho` on macOS); `--config <dir>`
+overrides both. Menu changes are saved on exit, and command-line options always
+win.
+
+On Windows, diagnostic logs are written to `keisho.log` beside `keisho.ini` by
+default (`--log-file <file>` chooses a custom path).
 
 ### Language
 
 The menu follows the system language, or the one set under **Video → Language**
-or `language` in the ini (`en`, `de`, `ja`, `pt_BR`, ...). It switches live and
+or `language` in the ini (`en`, `de`, `ja`, `pt`, `pt_BR`, ...). It switches live and
 uses the system's fonts for scripts the built-in font doesn't cover, and the
 Noto fonts in `data/lang/fonts/` for Thai, Hindi, Bengali, Tamil and Urdu
 where the system has none (as on Batocera).

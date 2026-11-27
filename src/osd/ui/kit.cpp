@@ -971,8 +971,20 @@ bool Kit::dropdown_impl(const char* name, const char* about, std::span<const std
     if (focused && nav_visible()) focus_ring(list, at, b, r);
 
     ImGui::SetNextWindowPos(ImVec2(at.x, b.y + px(2.0f)));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(size.x, 0.0f), ImVec2(size.x * 1.6f, px(360.0f)));
+    const float max_h = std::min(px(360.0f), ImGui::GetMainViewport()->WorkSize.y * 0.65f);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(size.x, 0.0f), ImVec2(size.x * 1.6f, max_h));
     if (ImGui::BeginPopup("list")) {
+        bool popup_scrolled = false;
+        if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)
+            && !ImGui::GetIO().WantTextInput) {
+            const ImVec2 drag = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 0.0f);
+            if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && std::abs(drag.y) > px(6.0f)
+                && ImGui::GetScrollMaxY() > 1.0f) {
+                ImGui::SetScrollY(std::clamp(ImGui::GetScrollY() - ImGui::GetIO().MouseDelta.y,
+                                             0.0f, ImGui::GetScrollMaxY()));
+                popup_scrolled = true;
+            }
+        }
         std::string needle;
         if (filter != nullptr && filter_size > 0 && g_touch_only) {
             filter[0] = '\0';  // no keyboard to type a filter with
@@ -988,6 +1000,7 @@ bool Kit::dropdown_impl(const char* name, const char* about, std::span<const std
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             ImGui::Separator();
         }
+        const float item_h = ImGui::GetTextLineHeight() + px(8.0f);
         for (int i = 0; i < n; ++i) {
             const std::string& label = labels[static_cast<size_t>(i)];
             if (!needle.empty()) {
@@ -998,7 +1011,7 @@ bool Kit::dropdown_impl(const char* name, const char* about, std::span<const std
             }
             const bool on = i == value;
             ImGui::PushID(i);
-            if (ImGui::Selectable(label.c_str(), on)) {
+            if (ImGui::Selectable(label.c_str(), on, 0, ImVec2(0.0f, item_h)) && !popup_scrolled) {
                 if (!on) { value = i; changed = true; }
                 ImGui::CloseCurrentPopup();
             }
@@ -1107,10 +1120,12 @@ bool Kit::field(const char* name, const char* about, std::string& text, const ch
         changed = true;
     }
     if (opts.disabled) ImGui::EndDisabled();
-    focus_if_asked();
+    if (button_label == nullptr) {
+        focus_if_asked();
+    }
     nav_item();
     const bool focused = ImGui::IsItemFocused();
-    const bool hot     = ImGui::IsItemHovered() || ImGui::IsItemActive();
+    bool       hot     = ImGui::IsItemHovered() || ImGui::IsItemActive() || focused;
     ImGui::PopStyleVar(2);
     if (focused && nav_visible() && !ImGui::IsItemActive()) {
         focus_ring(list, ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), px(kCtrlRound));
@@ -1118,12 +1133,13 @@ bool Kit::field(const char* name, const char* about, std::string& text, const ch
     if (button_label != nullptr) {
         const bool pressed = press_button(button_label, ImVec2(at.x + fw + px(6.0f), at.y), bsize, Tone::Plain,
                                           Icon::None, !opts.disabled);
+        hot = hot || ImGui::IsItemHovered() || ImGui::IsItemFocused();
         if (clicked != nullptr) *clicked = pressed;
     }
     ImGui::PopID();
 
     ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, placed.bottom));
-    end_row(placed, hot || focused);
+    end_row(placed, hot);
     return changed;
 }
 

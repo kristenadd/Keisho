@@ -24,6 +24,10 @@
 #include <mutex>
 #include <string>
 
+#if defined(__ANDROID__)
+#  include <android/log.h>
+#endif
+
 namespace sm2::log {
 
 namespace detail {
@@ -101,10 +105,22 @@ void write(Level level, const char* fmt, ...)
 
     std::lock_guard lock(g_mutex);
 
+#if defined(__ANDROID__)
+    int prio = ANDROID_LOG_INFO;
+    switch (level) {
+        case Level::Trace:   prio = ANDROID_LOG_VERBOSE; break;
+        case Level::Debug:   prio = ANDROID_LOG_DEBUG;   break;
+        case Level::Info:    prio = ANDROID_LOG_INFO;    break;
+        case Level::Warning: prio = ANDROID_LOG_WARN;    break;
+        case Level::Error:   prio = ANDROID_LOG_ERROR;   break;
+    }
+    __android_log_print(prio, "Keisho", "%s", buffer);
+#endif
+
     std::fprintf(stderr, "[%s] %s\n", level_tag(level), buffer);
     if (g_file != nullptr) {
         std::fprintf(g_file, "[%s] %s\n", level_tag(level), buffer);
-        if (level >= Level::Warning) {
+        if (level >= Level::Info) {
             std::fflush(g_file);
         }
     }

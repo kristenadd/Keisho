@@ -18,7 +18,7 @@ cmake_minimum_required(VERSION 3.24)
 #
 
 project(keisho
-    VERSION     0.9.63
+    VERSION     0.9.64
     DESCRIPTION "Sega Model 1, 2 & 3 arcade emulator"
     LANGUAGES   C CXX
 )
@@ -104,9 +104,18 @@ option(SM2_BUILD_TESTS  "Build unit tests"                          OFF)
 # Software rendering is always built. Vulkan defaults off so a bare build needs
 # no Vulkan driver. SM2_BUILD_OPENGL_DESKTOP and SM2_BUILD_OPENGL_ES are mutually
 # exclusive; GLES is for ARM targets.
+if(ANDROID)
+    # Required by Android 15+ devices with 16 KB page sizes.
+    add_link_options(-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384)
+    set(SM2_DEFAULT_GL_DESKTOP OFF)
+    set(SM2_DEFAULT_GL_ES      ON)
+else()
+    set(SM2_DEFAULT_GL_DESKTOP ON)
+    set(SM2_DEFAULT_GL_ES      OFF)
+endif()
 option(SM2_BUILD_VULKAN         "Build the Vulkan backend"                 OFF)
-option(SM2_BUILD_OPENGL_DESKTOP "Build the OpenGL 4.3 core desktop backend" ON)
-option(SM2_BUILD_OPENGL_ES      "Build the OpenGL ES 3.1 backend (ARM)"    OFF)
+option(SM2_BUILD_OPENGL_DESKTOP "Build the OpenGL 4.3 core desktop backend" ${SM2_DEFAULT_GL_DESKTOP})
+option(SM2_BUILD_OPENGL_ES      "Build the OpenGL ES 3.1 backend (ARM)"    ${SM2_DEFAULT_GL_ES})
 
 # Per-device light guns on Linux via evdev and libudev: SDL merges all mice into
 # one pointer, so this is the only way to tell two guns apart. ON makes a missing
@@ -121,7 +130,9 @@ set_property(CACHE SM2_EVDEV PROPERTY STRINGS AUTO ON OFF)
 # Vulkan through MoltenVK, which is why the portability-subset extensions are
 # requested opportunistically rather than gated on the platform.
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(ANDROID)
+    set(SM2_PLATFORM_ANDROID TRUE)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(SM2_PLATFORM_LINUX TRUE)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "visionOS")
     # iPhone and iPad. Vulkan through a statically linked MoltenVK is the only

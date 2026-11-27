@@ -303,6 +303,12 @@ u8 Input::axis_to_pedal(s16 value)
     return static_cast<u8>(std::min(scaled, 255));
 }
 
+/// Flip an axis reading while keeping -32768 within signed 16-bit bounds.
+[[nodiscard]] constexpr s16 apply_axis_invert(s16 value, bool invert)
+{
+    return invert ? static_cast<s16>(std::clamp(-static_cast<int>(value), -32768, 32767)) : value;
+}
+
 /// Linux KEY_CONFIG, written out so the Windows build has it too.
 constexpr u16 kKeyConfig = 0x171;
 
@@ -568,6 +574,90 @@ SDL_Gamepad* Input::pad_for(u32 player) const
                                         return pad.player == player && plays(pad);
                                     });
     return match != m_pads.end() ? match->handle : nullptr;
+}
+
+void Input::set_virtual_button(SDL_GamepadButton button, bool down)
+{
+    const int idx = static_cast<int>(button);
+    if (idx >= 0 && idx < SDL_GAMEPAD_BUTTON_COUNT) {
+        m_virtual.buttons[static_cast<usize>(idx)] = down;
+    }
+}
+
+void Input::set_virtual_axis(SDL_GamepadAxis axis, s16 value)
+{
+    const int idx = static_cast<int>(axis);
+    if (idx >= 0 && idx < SDL_GAMEPAD_AXIS_COUNT) {
+        m_virtual.axes[static_cast<usize>(idx)] = value;
+    }
+}
+
+void Input::set_virtual_operator(bool service, bool test)
+{
+    m_virtual.service = service;
+    m_virtual.test    = test;
+}
+
+void Input::set_virtual_touch_aim(bool active, bool engaged, float norm_x, float norm_y,
+                                  bool trigger, float screen_w, float screen_h)
+{
+    m_virtual.touch_aim_active  = active;
+    m_virtual.touch_aim_engaged = engaged;
+    m_virtual.touch_aim_x       = norm_x;
+    m_virtual.touch_aim_y       = norm_y;
+    m_virtual.touch_aim_trigger = trigger;
+    m_virtual.touch_screen_w    = screen_w;
+    m_virtual.touch_screen_h    = screen_h;
+}
+
+void Input::clear_virtual_pad()
+{
+    m_virtual.active            = false;
+    m_virtual.service           = false;
+    m_virtual.test              = false;
+    m_virtual.touch_aim_active  = false;
+    m_virtual.touch_aim_engaged = false;
+    m_virtual.touch_aim_trigger = false;
+    m_virtual.buttons.fill(false);
+    m_virtual.axes.fill(0);
+}
+
+bool Input::read_pad_button(u32 player, SDL_Gamepad* pad, SDL_GamepadButton button) const
+{
+    if (pad != nullptr && SDL_GetGamepadButton(pad, button)) {
+        return true;
+    }
+    const int idx = static_cast<int>(button);
+    return player == 0 && m_virtual.active && idx >= 0 && idx < SDL_GAMEPAD_BUTTON_COUNT
+        && m_virtual.buttons[static_cast<usize>(idx)];
+}
+
+s16 Input::read_pad_axis(u32 player, SDL_Gamepad* pad, SDL_GamepadAxis axis) const
+{
+    const s16 hw = (pad != nullptr && axis != SDL_GAMEPAD_AXIS_INVALID)
+                       ? SDL_GetGamepadAxis(pad, axis)
+                       : static_cast<s16>(0);
+    const int idx = static_cast<int>(axis);
+    if (player != 0 || !m_virtual.active || idx < 0 || idx >= SDL_GAMEPAD_AXIS_COUNT) {
+        return hw;
+    }
+    const s16 virt = m_virtual.axes[static_cast<usize>(idx)];
+    if (axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
+        return std::max(hw, virt);
+    }
+    return std::abs(static_cast<int>(virt)) > std::abs(static_cast<int>(hw)) ? virt : hw;
+}
+
+std::vector<Input::Pad> Input::effective_pads() const
+{
+    std::vector<Pad> pads = m_pads;
+    if (m_virtual.active && pad_for(0) == nullptr) {
+        Pad vpad{};
+        vpad.player     = 0;
+        vpad.is_virtual = true;
+        pads.push_back(vpad);
+    }
+    return pads;
 }
 
 void Input::add_wheel(SDL_JoystickID id)
@@ -898,8 +988,9 @@ u8 Input::sample_channel(const rom::AnalogChannel& channel, float curve, bool on
     const bool second = axis == HostAxis::Pad2LeftX || axis == HostAxis::Pad2LeftY
                      || axis == HostAxis::Pad2RightTrigger;
     const bool lever  = second && one_player && axis != HostAxis::Pad2RightTrigger;
-    SDL_Gamepad* pad = pad_for(second && !lever ? 1u : 0u);
-    if (pad == nullptr) {
+    const u32 which_player = second && !lever ? 1u : 0u;
+    SDL_Gamepad* pad = pad_for(which_player);
+    if (pad == nullptr && !(which_player == 0 && m_virtual.active)) {
         // No pad for this control: return the hardware's rest value. Full lock or full
         // throttle at boot can stop a game leaving its self-test.
         return channel.rest;
@@ -920,7 +1011,6 @@ u8 Input::sample_channel(const rom::AnalogChannel& channel, float curve, bool on
 
     // The axis a role reads: the user's override, else the default. Player
     // two's aim reads its own pad.
-    const u32 which_player = second && !lever ? 1u : 0u;
     const auto role_axis = [&](Config::PadAxisRole role, SDL_GamepadAxis fallback,
                                bool* inverted) {
         const s32 override_axis = m_pad_axes[which_player][static_cast<u32>(role)];
@@ -937,8 +1027,7 @@ u8 Input::sample_channel(const rom::AnalogChannel& channel, float curve, bool on
             const SDL_GamepadAxis sdl =
                 lever ? role_axis(Config::PadAxisRole::LeverX, SDL_GAMEPAD_AXIS_RIGHTX, &inv)
                       : role_axis(Config::PadAxisRole::AimX, SDL_GAMEPAD_AXIS_LEFTX, &inv);
-            s16 raw = SDL_GetGamepadAxis(pad, sdl);
-            if (inv) raw = static_cast<s16>(-static_cast<int>(raw));
+            s16 raw = apply_axis_invert(read_pad_axis(which_player, pad, sdl), inv);
             fraction = centred(raw);
             break;
         }
@@ -948,8 +1037,7 @@ u8 Input::sample_channel(const rom::AnalogChannel& channel, float curve, bool on
             const SDL_GamepadAxis sdl =
                 lever ? role_axis(Config::PadAxisRole::LeverY, SDL_GAMEPAD_AXIS_RIGHTY, &inv)
                       : role_axis(Config::PadAxisRole::AimY, SDL_GAMEPAD_AXIS_LEFTY, &inv);
-            s16 raw = SDL_GetGamepadAxis(pad, sdl);
-            if (inv) raw = static_cast<s16>(-static_cast<int>(raw));
+            s16 raw = apply_axis_invert(read_pad_axis(which_player, pad, sdl), inv);
             fraction = centred(raw);
             break;
         }
@@ -961,7 +1049,9 @@ u8 Input::sample_channel(const rom::AnalogChannel& channel, float curve, bool on
                 axis != HostAxis::LeftTrigger
                     ? role_axis(Config::PadAxisRole::Accel, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, &inv)
                     : role_axis(Config::PadAxisRole::Brake, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, &inv);
-            int reading = which == SDL_GAMEPAD_AXIS_INVALID ? kPedalFloor : static_cast<int>(SDL_GetGamepadAxis(pad, which));
+            int reading = which == SDL_GAMEPAD_AXIS_INVALID
+                              ? kPedalFloor
+                              : static_cast<int>(read_pad_axis(which_player, pad, which));
             // A stick bound to a pedal rests centred, not low, so its full
             // swing is the pedal.
             const bool is_stick_axis = which == SDL_GAMEPAD_AXIS_LEFTX
@@ -979,7 +1069,7 @@ u8 Input::sample_channel(const rom::AnalogChannel& channel, float curve, bool on
             // A button bound to the pedal floors it while held.
             const auto role   = axis != HostAxis::LeftTrigger ? Config::PadAxisRole::Accel
                                                               : Config::PadAxisRole::Brake;
-            if (binding_held(pad, m_pad_axis_buttons[which_player][static_cast<u32>(role)])) {
+            if (binding_held_for(which_player, pad, m_pad_axis_buttons[which_player][static_cast<u32>(role)])) {
                 fraction = 1.0f;
             }
             break;
@@ -1001,6 +1091,23 @@ u8 Input::sample_channel(const rom::AnalogChannel& channel, float curve, bool on
     }
     // PORT_REVERSE mirrors within the declared travel, not within the byte.
     return static_cast<u8>(channel.maximum - (value - channel.minimum));
+}
+
+bool Input::binding_held_for(u32 player, SDL_Gamepad* pad, s32 binding) const
+{
+    constexpr int kHalfTravel = 16384;
+    if ((pad == nullptr && !(player == 0 && m_virtual.active)) || binding < 0) {
+        return false;
+    }
+    if (binding >= Config::kPadAxisMinus) {
+        const auto axis = static_cast<SDL_GamepadAxis>(binding - Config::kPadAxisMinus);
+        return read_pad_axis(player, pad, axis) < -kHalfTravel;
+    }
+    if (binding >= Config::kPadAxisPlus) {
+        const auto axis = static_cast<SDL_GamepadAxis>(binding - Config::kPadAxisPlus);
+        return read_pad_axis(player, pad, axis) > kHalfTravel;
+    }
+    return read_pad_button(player, pad, static_cast<SDL_GamepadButton>(binding));
 }
 
 bool Input::binding_held(SDL_Gamepad* pad, s32 binding)
@@ -1030,14 +1137,15 @@ bool Input::pad_button_held(const Pad& pad, SDL_GamepadButton physical) const
             break;
         }
     }
-    return binding_held(pad.handle, button);
+    return binding_held_for(pad.player, pad.handle, button);
 }
 
 bool Input::pad_role_held(u32 player, Config::PadRole role) const
 {
-    for (const Pad& pad : m_pads) {
+    for (const Pad& pad : effective_pads()) {
         if (plays(pad) && pad.player == player) {
-            return binding_held(pad.handle, m_pad_buttons[player][static_cast<u32>(role)]);
+            return binding_held_for(player, pad.handle,
+                                    m_pad_buttons[player][static_cast<u32>(role)]);
         }
     }
     return false;
@@ -1047,14 +1155,14 @@ bool Input::pad_pedal_pressed(SDL_Gamepad* pad, u32 player, Config::PadAxisRole 
 {
     const auto r = static_cast<u32>(role);
     if (const s32 button = m_pad_axis_buttons[player][r]; button >= 0) {
-        return binding_held(pad, button);
+        return binding_held_for(player, pad, button);
     }
     const s32  bound = m_pad_axes[player][r];
     const auto axis  = bound >= 0 ? static_cast<SDL_GamepadAxis>(bound)
                      : role == Config::PadAxisRole::Brake ? SDL_GAMEPAD_AXIS_LEFT_TRIGGER
                                                           : SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
     const bool stick = axis != SDL_GAMEPAD_AXIS_LEFT_TRIGGER && axis != SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
-    int reading = SDL_GetGamepadAxis(pad, axis);
+    int reading = read_pad_axis(player, pad, axis);
     if (m_pad_axis_invert[player][r]) {
         reading = stick ? -reading : 32767 - reading;
     }
@@ -1276,7 +1384,7 @@ Input::PadShortcuts Input::update_pad_shortcuts(bool enabled)
 
 bool Input::operator_chord(const Pad& pad, u8* port0)
 {
-    if (!SDL_GetGamepadButton(pad.handle, SDL_GAMEPAD_BUTTON_GUIDE)) {
+    if (pad.handle == nullptr || !SDL_GetGamepadButton(pad.handle, SDL_GAMEPAD_BUTTON_GUIDE)) {
         return false;
     }
     if (SDL_GetGamepadButton(pad.handle, SDL_GAMEPAD_BUTTON_LEFT_STICK)) {
@@ -1921,13 +2029,42 @@ void Input::gather_lightguns(hw::Inputs* inputs, const rom::GameSpec& game) cons
         guns = m_guns->count();
     }
 #endif
-    const std::array<bool, kPlayers> on_gun   = {guns >= 1, guns >= 2};
-    std::array<bool, kPlayers>       on_mouse = {guns == 0, false};
-    GunInput p1 = on_mouse[0] ? from_mouse() : GunInput{};
+    const std::array<bool, kPlayers> on_gun       = {guns >= 1, guns >= 2};
+    const bool                       on_touch_aim = m_virtual.touch_aim_active && !on_gun[0];
+    std::array<bool, kPlayers>       on_mouse     = {guns == 0 && !on_touch_aim && !m_virtual.active, false};
+    GunInput p1;
+    if (on_touch_aim) {
+        p1.win_x   = std::clamp(m_virtual.touch_aim_x, 0.0f, 1.0f);
+        p1.win_y   = std::clamp(m_virtual.touch_aim_y, 0.0f, 1.0f);
+        p1.trigger = m_virtual.touch_aim_trigger;
+        float touch_fx = 0.5f;
+        float touch_fy = 0.5f;
+        if (m_virtual.touch_screen_w > 1.0f && m_virtual.touch_screen_h > 1.0f) {
+            const float px = p1.win_x * m_virtual.touch_screen_w;
+            const float py = p1.win_y * m_virtual.touch_screen_h;
+            const render::Letterbox box = render::compute_game_rect(
+                static_cast<u32>(m_virtual.touch_screen_w),
+                static_cast<u32>(m_virtual.touch_screen_h),
+                m_present_aspect, m_present_method, m_present_area);
+            if (box.width > 0.0f && box.height > 0.0f) {
+                touch_fx = (px - box.x) / box.width;
+                touch_fy = (py - box.y) / box.height;
+            }
+        }
+        p1.x = touch_fx;
+        p1.y = touch_fy;
+    } else if (on_mouse[0]) {
+        p1 = from_mouse();
+    }
+    if (m_virtual.suppress_pointer && on_mouse[0]) {
+        p1.trigger = false;
+        p1.reload  = false;
+        p1.missile = false;
+    }
     GunInput p2;
 
     // Moving the mouse hands the aim back to it from the pad/keyboard cursor.
-    if (pointer.x != m_gun_last_ptr_x || pointer.y != m_gun_last_ptr_y) {
+    if (!m_virtual.suppress_pointer && (pointer.x != m_gun_last_ptr_x || pointer.y != m_gun_last_ptr_y)) {
         for (usize p = 0; p < kPlayers; ++p) {
             // A gun moves the pointer too.
             if (on_mouse[p] || on_gun[p]) m_gun_cursor_owns[p] = false;
@@ -2048,8 +2185,12 @@ void Input::gather_lightguns(hw::Inputs* inputs, const rom::GameSpec& game) cons
     // Brake / Right Alt. It overrides the mouse only while driven.
     {
         const auto aim_from = [&](usize player, GunInput& gi) {
-            // Without a mouse or gun under it, the cursor is the aim from the start.
-            if (!on_mouse[player] && !on_gun[player]) {
+            const bool has_touch = (player == 0 && on_touch_aim);
+            if (has_touch && m_virtual.touch_aim_engaged) {
+                m_gun_cursor_owns[player] = false;
+            }
+            // Without a mouse, touch or gun under it, the cursor is the aim from the start.
+            if (!on_mouse[player] && !on_gun[player] && !has_touch) {
                 m_gun_cursor_owns[player] = true;
             }
             bool active = false;
@@ -2059,16 +2200,24 @@ void Input::gather_lightguns(hw::Inputs* inputs, const rom::GameSpec& game) cons
             bool  centred = false;
             float cx      = 0.0f;
             float cy      = 0.0f;
-            if (SDL_Gamepad* pad = pad_for(static_cast<u32>(player)); pad != nullptr) {
-                // Aim on either stick.
-                for (const auto [ax, ay] : {std::pair{SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY},
-                                            std::pair{SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY}}) {
-                    const s16 sx = SDL_GetGamepadAxis(pad, ax);
-                    const s16 sy = SDL_GetGamepadAxis(pad, ay);
+            if (has_pad_for(static_cast<u32>(player))) {
+                SDL_Gamepad* pad = pad_for(static_cast<u32>(player));
+                const u32    p   = static_cast<u32>(player);
+                const bool  is_virtual = pad == nullptr && m_virtual.active;
+                const int   aim_dead   = is_virtual ? 2500 : (kStickThreshold / 2);
+                const float c_dead     = is_virtual ? 2500.0f : m_pad_stick_dead;
+                for (const auto& [ax, ay] : {std::pair{SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY},
+                                             std::pair{SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY}}) {
+                    const s16 sx = apply_axis_invert(
+                        read_pad_axis(p, pad, ax),
+                        m_pad_axis_invert[p][static_cast<u32>(Config::PadAxisRole::AimX)]);
+                    const s16 sy = apply_axis_invert(
+                        read_pad_axis(p, pad, ay),
+                        m_pad_axis_invert[p][static_cast<u32>(Config::PadAxisRole::AimY)]);
                     if (m_pad_aim_centred) {
-                        cx += centred_fraction(sx, m_pad_stick_dead, 1.0f, 1.0f) * 2.0f - 1.0f;
-                        cy += centred_fraction(sy, m_pad_stick_dead, 1.0f, 1.0f) * 2.0f - 1.0f;
-                    } else if (std::abs(sx) > kStickThreshold / 2 || std::abs(sy) > kStickThreshold / 2) {
+                        cx += centred_fraction(sx, c_dead, 1.0f, m_pad_aim_sensitivity) * 2.0f - 1.0f;
+                        cy += centred_fraction(sy, c_dead, 1.0f, m_pad_aim_sensitivity) * 2.0f - 1.0f;
+                    } else if (std::abs(sx) > aim_dead || std::abs(sy) > aim_dead) {
                         dx += static_cast<float>(sx) / 32767.0f;
                         dy += static_cast<float>(sy) / 32767.0f;
                         active = true;
@@ -2079,21 +2228,20 @@ void Input::gather_lightguns(hw::Inputs* inputs, const rom::GameSpec& game) cons
                 cx      = std::clamp(cx, -1.0f, 1.0f);
                 cy      = std::clamp(cy, -1.0f, 1.0f);
                 centred = m_pad_aim_centred;
-                const u32 p = static_cast<u32>(player);
                 const auto& binds = m_pad_buttons[p];
-                if (binding_held(pad, binds[static_cast<u32>(Config::PadRole::Button1)])) {
+                if (binding_held_for(p, pad, binds[static_cast<u32>(Config::PadRole::Button1)])) {
                     gi.trigger = true;
                 }
-                if (binding_held(pad, binds[static_cast<u32>(Config::PadRole::Button2)])) {
+                if (binding_held_for(p, pad, binds[static_cast<u32>(Config::PadRole::Button2)])) {
                     if (has_missile) gi.missile = true;
                     else { gi.trigger = true; gi.reload = true; }
                 }
                 if (pad_pedal_pressed(pad, p, Config::PadAxisRole::Accel)) {
                     gi.trigger = true;
-                    active     = true;
+                    if (pad != nullptr) active = true;
                 }
                 if (pad_pedal_pressed(pad, p, Config::PadAxisRole::Brake)) {
-                    active = true;
+                    if (pad != nullptr) active = true;
                     if (has_missile) gi.missile = true;
                     else { gi.trigger = true; gi.reload = true; }
                 }
@@ -2128,10 +2276,10 @@ void Input::gather_lightguns(hw::Inputs* inputs, const rom::GameSpec& game) cons
                     m_gun_cursor_y[player]   = std::clamp(gi.y, 0.0f, 1.0f);
                     m_gun_cursor_owns[player] = true;
                 }
-                // ~1.5%/frame at full deflection is a controllable sweep at 57.5 Hz.
                 constexpr float kSpeed = 0.015f;
-                m_gun_cursor_x[player] = std::clamp(m_gun_cursor_x[player] + dx * kSpeed, 0.0f, 1.0f);
-                m_gun_cursor_y[player] = std::clamp(m_gun_cursor_y[player] + dy * kSpeed, 0.0f, 1.0f);
+                const float     step   = kSpeed * m_pad_aim_sensitivity;
+                m_gun_cursor_x[player] = std::clamp(m_gun_cursor_x[player] + dx * step, 0.0f, 1.0f);
+                m_gun_cursor_y[player] = std::clamp(m_gun_cursor_y[player] + dy * step, 0.0f, 1.0f);
             }
             if (!m_gun_cursor_owns[player]) {
                 return;  // the mouse or gun keeps the aim.
@@ -2403,7 +2551,9 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
         }
     }
 
-    for (const Pad& pad : m_pads) {
+    const std::vector<Pad> pads = effective_pads();
+
+    for (const Pad& pad : pads) {
         if (!plays(pad) || pad.player >= kPlayers || is_von || is_desert
             || is_ski || is_skichamp || is_wski || is_skytgt) {
             continue;
@@ -2424,7 +2574,7 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
         bool rb_bound = false;
         for (usize role = 0; role < std::size(kPadRoleBit); ++role) {
             const bool gun_role = is_gun && role <= static_cast<usize>(Config::PadRole::Button2);
-            if (!gun_role && !own_controls && binding_held(pad.handle, binds[role])) {
+            if (!gun_role && !own_controls && binding_held_for(pad.player, pad.handle, binds[role])) {
                 port &= static_cast<u8>(~kPadRoleBit[role]);
             }
             lb_bound |= binds[role] == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;
@@ -2439,11 +2589,11 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
         lb_bound |= binds[kB3] != kDefaults[kB3];
         rb_bound |= binds[kB4] != kDefaults[kB4];
         if (!own_controls && !lb_bound
-            && SDL_GetGamepadButton(pad.handle, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
+            && read_pad_button(pad.player, pad.handle, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
             port &= static_cast<u8>(~kButton3);
         }
         if (!own_controls && !rb_bound
-            && SDL_GetGamepadButton(pad.handle, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) {
+            && read_pad_button(pad.player, pad.handle, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) {
             port &= static_cast<u8>(~kButton4);
         }
 
@@ -2452,7 +2602,7 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
         // (Daytona). Player one only.
         if (game.vr_buttons_declared && pad.player == 0 && !is_wingwar) {
             for (u8 i = 0; i < game.vr_button_count && i < 4; ++i) {
-                if (binding_held(pad.handle, binds[i])) {
+                if (binding_held_for(pad.player, pad.handle, binds[i])) {
                     const auto [vport, vbit] = game.wheel_button_bits[i];
                     if (vport < 3) {
                         ports[vport] &= static_cast<u8>(~vbit);
@@ -2463,9 +2613,13 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
 
         // The left stick drives the same four switches as the d-pad.
         if (!own_controls && !stick_analog[pad.player]) {
-            port &= static_cast<u8>(
-                ~stick_bits(SDL_GetGamepadAxis(pad.handle, SDL_GAMEPAD_AXIS_LEFTX),
-                            SDL_GetGamepadAxis(pad.handle, SDL_GAMEPAD_AXIS_LEFTY)));
+            const s16 lx = apply_axis_invert(
+                read_pad_axis(pad.player, pad.handle, SDL_GAMEPAD_AXIS_LEFTX),
+                m_pad_axis_invert[pad.player][static_cast<u32>(Config::PadAxisRole::AimX)]);
+            const s16 ly = apply_axis_invert(
+                read_pad_axis(pad.player, pad.handle, SDL_GAMEPAD_AXIS_LEFTY),
+                m_pad_axis_invert[pad.player][static_cast<u32>(Config::PadAxisRole::AimY)]);
+            port &= static_cast<u8>(~stick_bits(lx, ly));
         }
 
         // Wing War: Button 1-3 fire the machine gun, missile and smoke, the
@@ -2474,7 +2628,7 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
         // trigger, the pilot's view on Button 3; the gunner's pair sit on IN1
         // 0x04/0x08. The roles are the ones the Gamepad tab binds.
         const auto press_role = [&](Config::PadRole r, usize p, u8 bit) {
-            if (binding_held(pad.handle, binds[static_cast<u32>(r)])) {
+            if (binding_held_for(pad.player, pad.handle, binds[static_cast<u32>(r)])) {
                 ports[p] &= static_cast<u8>(~bit);
             }
         };
@@ -2503,7 +2657,7 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
 
         // Start/coin; coin 2 is player 2's slot.
         const auto held = [&](Config::PadRole role) {
-            return binding_held(pad.handle, binds[static_cast<u32>(role)]);
+            return binding_held_for(pad.player, pad.handle, binds[static_cast<u32>(role)]);
         };
         const bool start = held(Config::PadRole::Start);
         const bool back  = held(Config::PadRole::Coin);
@@ -2543,7 +2697,7 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
             if (kdown(SDL_SCANCODE_B)) press(kZoomOut);
         }
 
-        for (const Pad& pad : m_pads) {
+        for (const Pad& pad : pads) {
             if (!plays(pad) || pad.player != 0) {
                 continue;
             }
@@ -2587,7 +2741,7 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
             if (kdown(SDL_SCANCODE_C)) press(kSelect3);
         }
 
-        for (const Pad& pad : m_pads) {
+        for (const Pad& pad : pads) {
             if (!plays(pad) || pad.player != 0) {
                 continue;
             }
@@ -2628,7 +2782,7 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
             if (kdown(SDL_SCANCODE_C))    press(kSet);
         }
 
-        for (const Pad& pad : m_pads) {
+        for (const Pad& pad : pads) {
             if (!plays(pad) || pad.player != 0) {
                 continue;
             }
@@ -2660,13 +2814,13 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
             if (kdown(SDL_SCANCODE_LCTRL)) ports[1] &= static_cast<u8>(~0x10);
             if (kdown(SDL_SCANCODE_X))     ports[1] &= static_cast<u8>(~0x20);
         }
-        for (const Pad& pad : m_pads) {
+        for (const Pad& pad : pads) {
             if (!plays(pad) || pad.player != 0) {
                 continue;
             }
-            if (SDL_GetGamepadAxis(pad.handle, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > kTriggerPress)
+            if (read_pad_axis(0, pad.handle, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > kTriggerPress)
                 ports[1] &= static_cast<u8>(~0x10);   // Machine Gun
-            if (SDL_GetGamepadAxis(pad.handle, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > kTriggerPress)
+            if (read_pad_axis(0, pad.handle, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > kTriggerPress)
                 ports[1] &= static_cast<u8>(~0x20);   // Missile
             if (pad_button_held(pad, SDL_GAMEPAD_BUTTON_NORTH))
                 ports[0] &= static_cast<u8>(~0x20);   // View Change
@@ -2852,7 +3006,7 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
                 snap_left  = kdown(SDL_SCANCODE_LEFT);
                 snap_right = kdown(SDL_SCANCODE_RIGHT);
             }
-            for (const Pad& pad : m_pads) {
+            for (const Pad& pad : pads) {
                 if (!plays(pad) || pad.player != 0) continue;
                 if (pad_button_held(pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT))
                     snap_left = true;
@@ -2891,7 +3045,7 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
             jump_front = down(SDL_SCANCODE_Z);
             jump_tail  = down(SDL_SCANCODE_X);
         }
-        for (const Pad& pad : m_pads) {
+        for (const Pad& pad : pads) {
             if (!plays(pad) || pad.player != 0) {
                 continue;
             }
@@ -2910,12 +3064,12 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
         // Past its limit Slide skids the board instead of turning, so it sits on
         // the triggers rather than the steering axis: left skids left.
         float slide = 0.0f;
-        for (const Pad& pad : m_pads) {
+        for (const Pad& pad : pads) {
             if (!plays(pad) || pad.player != 0) {
                 continue;
             }
             const auto pull = [&](SDL_GamepadAxis axis) {
-                const int raw = static_cast<int>(SDL_GetGamepadAxis(pad.handle, axis));
+                const int raw = static_cast<int>(read_pad_axis(0, pad.handle, axis));
                 return static_cast<float>(std::max(0, raw - kPedalFloor))
                      / static_cast<float>(32767 - kPedalFloor);
             };
@@ -2973,7 +3127,7 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
             p2_entry       = down(SDL_SCANCODE_C);
             p2_call        = down(SDL_SCANCODE_V);
         }
-        for (const Pad& pad : m_pads) {
+        for (const Pad& pad : pads) {
             if (!plays(pad) || pad.player != 0) {
                 continue;
             }
@@ -3000,14 +3154,21 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
         u8 in1 = 0;  // bits to press (active high here; folded in active-low below)
         u8 in2 = 0;
 
-        for (const Pad& pad : m_pads) {
+        for (const Pad& pad : pads) {
             if (!plays(pad) || pad.player != 0) {
                 continue;
             }
 
             // Left lever: left analog stick, doubled by the d-pad.
-            in1 |= stick_bits(SDL_GetGamepadAxis(pad.handle, SDL_GAMEPAD_AXIS_LEFTX),
-                              SDL_GetGamepadAxis(pad.handle, SDL_GAMEPAD_AXIS_LEFTY));
+            {
+                const s16 vlx = apply_axis_invert(
+                    read_pad_axis(pad.player, pad.handle, SDL_GAMEPAD_AXIS_LEFTX),
+                    m_pad_axis_invert[pad.player][static_cast<u32>(Config::PadAxisRole::AimX)]);
+                const s16 vly = apply_axis_invert(
+                    read_pad_axis(pad.player, pad.handle, SDL_GAMEPAD_AXIS_LEFTY),
+                    m_pad_axis_invert[pad.player][static_cast<u32>(Config::PadAxisRole::AimY)]);
+                in1 |= stick_bits(vlx, vly);
+            }
             if (pad_button_held(pad, SDL_GAMEPAD_BUTTON_DPAD_UP))    in1 |= kUp;
             if (pad_button_held(pad, SDL_GAMEPAD_BUTTON_DPAD_DOWN))  in1 |= kDown;
             if (pad_button_held(pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT))  in1 |= kLeft;
@@ -3020,11 +3181,15 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
                 const auto ly = static_cast<u32>(Config::PadAxisRole::LeverY);
                 const s32  bx = m_pad_axes[pad.player][lx];
                 const s32  by = m_pad_axes[pad.player][ly];
-                in2 |= stick_bits(
-                    SDL_GetGamepadAxis(pad.handle, bx >= 0 ? static_cast<SDL_GamepadAxis>(bx)
-                                                           : SDL_GAMEPAD_AXIS_RIGHTX),
-                    SDL_GetGamepadAxis(pad.handle, by >= 0 ? static_cast<SDL_GamepadAxis>(by)
-                                                           : SDL_GAMEPAD_AXIS_RIGHTY));
+                const s16 vrx = apply_axis_invert(
+                    read_pad_axis(pad.player, pad.handle, bx >= 0 ? static_cast<SDL_GamepadAxis>(bx)
+                                                                  : SDL_GAMEPAD_AXIS_RIGHTX),
+                    m_pad_axis_invert[pad.player][lx]);
+                const s16 vry = apply_axis_invert(
+                    read_pad_axis(pad.player, pad.handle, by >= 0 ? static_cast<SDL_GamepadAxis>(by)
+                                                                  : SDL_GAMEPAD_AXIS_RIGHTY),
+                    m_pad_axis_invert[pad.player][ly]);
+                in2 |= stick_bits(vrx, vry);
             }
             if (pad_button_held(pad, SDL_GAMEPAD_BUTTON_NORTH)) in2 |= kUp;
             if (pad_button_held(pad, SDL_GAMEPAD_BUTTON_SOUTH)) in2 |= kDown;
@@ -3268,7 +3433,7 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
             step(role_held(Config::WheelRole::GearUp), role_held(Config::WheelRole::GearDown),
                  &m_gear_up_held, &m_gear_down_held);
         }
-        if (pad_for(0) != nullptr) {
+        if (has_pad_for(0)) {
             sequential = true;
             step(pad_role_held(0, Config::PadRole::GearUp),
                  pad_role_held(0, Config::PadRole::GearDown),
@@ -3323,6 +3488,9 @@ void Input::poll(hw::Inputs* inputs, const rom::GameSpec& game) const
         if (up)   inputs->in1 &= static_cast<u8>(vr ? ~0x20 : ~0x10);
         if (down) inputs->in1 &= static_cast<u8>(vr ? ~0x10 : ~0x20);
     }
+
+    if (m_virtual.service) inputs->in0 &= static_cast<u8>(~kService);
+    if (m_virtual.test)    inputs->in0 &= static_cast<u8>(~kTest);
 
     // What the game reads, for --log-level debug.
     for (usize channel = 0; channel < inputs->analog.size(); ++channel) {

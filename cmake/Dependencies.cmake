@@ -88,6 +88,18 @@ if(SM2_BUILD_VULKAN AND SM2_PLATFORM_IOS)
     set(Vulkan_VERSION "1.4.${Vulkan_VERSION} (MoltenVK ${sm2_mvk_slice})")
 elseif(SM2_BUILD_VULKAN)
     find_package(Vulkan QUIET)
+    if(NOT Vulkan_FOUND AND ANDROID)
+        find_path(Vulkan_INCLUDE_DIR NAMES vulkan/vulkan.h)
+        find_library(Vulkan_LIBRARY NAMES vulkan)
+        if(Vulkan_INCLUDE_DIR AND Vulkan_LIBRARY)
+            add_library(Vulkan::Vulkan UNKNOWN IMPORTED)
+            set_target_properties(Vulkan::Vulkan PROPERTIES
+                IMPORTED_LOCATION "${Vulkan_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${Vulkan_INCLUDE_DIR}")
+            set(Vulkan_FOUND TRUE)
+            set(Vulkan_VERSION "1.3 (Android NDK)")
+        endif()
+    endif()
     if(NOT Vulkan_FOUND)
         message(FATAL_ERROR
             "SM2_BUILD_VULKAN is ON but the Vulkan headers and loader were not found.\n"
@@ -111,13 +123,28 @@ elseif(SM2_BUILD_VULKAN)
     endif()
 endif()
 
-# glslc compiles GLSL to SPIR-V at build time. Prefer the one shipped beside
-# the loader, then anything on PATH.
+# glslc compiles GLSL to SPIR-V at build time.
+set(_sm2_glslc_hints
+    "$ENV{VULKAN_SDK}/bin"
+    "${Vulkan_INCLUDE_DIR}/../bin"
+)
+if(DEFINED ANDROID_NDK)
+    list(APPEND _sm2_glslc_hints
+        "${ANDROID_NDK}/shader-tools/windows-x86_64"
+        "${ANDROID_NDK}/shader-tools/linux-x86_64"
+        "${ANDROID_NDK}/shader-tools/darwin-x86_64"
+    )
+endif()
+if(DEFINED CMAKE_ANDROID_NDK)
+    list(APPEND _sm2_glslc_hints
+        "${CMAKE_ANDROID_NDK}/shader-tools/windows-x86_64"
+        "${CMAKE_ANDROID_NDK}/shader-tools/linux-x86_64"
+        "${CMAKE_ANDROID_NDK}/shader-tools/darwin-x86_64"
+    )
+endif()
 find_program(SM2_GLSLC
     NAMES glslc
-    HINTS
-        "$ENV{VULKAN_SDK}/bin"
-        "${Vulkan_INCLUDE_DIR}/../bin"
+    HINTS ${_sm2_glslc_hints}
     DOC "glslc GLSL-to-SPIR-V compiler"
 )
 
@@ -136,9 +163,8 @@ endif()
 # SDL3 — window, input, audio
 # ---------------------------------------------------------------------------
 
-# Windows has no system SDL3 and wants a self-contained exe, so build the
-# vendored copy static there; elsewhere prefer the system's.
-if(WIN32)
+# Static vendored SDL3 on Windows; shared on Android so JNI_OnLoad is exported.
+if(WIN32 OR ANDROID)
     set(SDL3_FOUND FALSE)
 else()
     find_package(SDL3 3.2 CONFIG QUIET)
@@ -149,10 +175,14 @@ if(SDL3_FOUND)
 else()
     set(SM2_SDL3_ORIGIN "vendored (3rdparty/SDL)")
 
-    # Trim the build to what the emulator actually uses. SDL's own tests and
-    # the shared library are pure overhead here.
-    set(SDL_SHARED        OFF CACHE BOOL "" FORCE)
-    set(SDL_STATIC        ON  CACHE BOOL "" FORCE)
+    # Trim the build to what the emulator actually uses.
+    if(ANDROID)
+        set(SDL_SHARED ON  CACHE BOOL "" FORCE)
+        set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+    else()
+        set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+        set(SDL_STATIC ON  CACHE BOOL "" FORCE)
+    endif()
     set(SDL_TEST_LIBRARY  OFF CACHE BOOL "" FORCE)
     set(SDL_EXAMPLES      OFF CACHE BOOL "" FORCE)
     set(SDL_INSTALL       OFF CACHE BOOL "" FORCE)
@@ -169,8 +199,10 @@ endif()
 # Header-only, so the fallback is just an include directory exposing the
 # GPUOpen::VulkanMemoryAllocator target the source expects.
 
-if(SM2_BUILD_VULKAN)
+if(NOT ANDROID)
     find_package(VulkanMemoryAllocator CONFIG QUIET)
+endif()
+if(SM2_BUILD_VULKAN)
     if(NOT VulkanMemoryAllocator_FOUND)
         add_library(GPUOpen::VulkanMemoryAllocator INTERFACE IMPORTED)
         set_target_properties(GPUOpen::VulkanMemoryAllocator PROPERTIES
@@ -183,7 +215,9 @@ endif()
 # ---------------------------------------------------------------------------
 # The rest of the tree links sm2_miniz and includes <miniz.h>.
 
-find_package(miniz CONFIG QUIET)
+if(NOT ANDROID)
+    find_package(miniz CONFIG QUIET)
+endif()
 if(miniz_FOUND)
     # The upstream install puts the header at include/miniz/miniz.h; expose
     # that subdirectory so the loader's #include <miniz.h> still resolves.
@@ -262,7 +296,9 @@ endif()
 # System-preferred and optional: without it the scraper's networking compiles
 # out (SM2_HAVE_CURL undefined) and the picker runs offline. Hence no vendored
 # fallback and no fatal error when absent.
-find_package(CURL QUIET)
+if(NOT ANDROID)
+    find_package(CURL QUIET)
+endif()
 if(CURL_FOUND)
     set(SM2_HAVE_CURL TRUE)
     set(SM2_CURL_ORIGIN "system (${CURL_VERSION_STRING})")
@@ -277,7 +313,9 @@ endif()
 # The vendored fallback compiles only the subset the 7z reader needs. The SDK
 # has no git repository, so its sources are committed rather than a submodule.
 
-find_package(lzmasdk CONFIG QUIET)
+if(NOT ANDROID)
+    find_package(lzmasdk CONFIG QUIET)
+endif()
 if(lzmasdk_FOUND)
     add_library(sm2_7z INTERFACE)
     target_link_libraries(sm2_7z INTERFACE lzmasdk::lzmasdk)
@@ -310,7 +348,9 @@ endif()
 # (its shared library), so alias that to pugixml::static when the static target
 # is absent -- the loader is read-only and does not care which it links.
 
-find_package(pugixml CONFIG QUIET)
+if(NOT ANDROID)
+    find_package(pugixml CONFIG QUIET)
+endif()
 if(pugixml_FOUND)
     if(NOT TARGET pugixml::static AND TARGET pugixml::pugixml)
         add_library(pugixml::static ALIAS pugixml::pugixml)
@@ -332,7 +372,9 @@ endif()
 # On the vendored path each renderer backend gets its own target, so a build
 # without Vulkan links no Vulkan.
 
-find_package(imgui CONFIG QUIET)
+if(NOT ANDROID)
+    find_package(imgui CONFIG QUIET)
+endif()
 if(imgui_FOUND)
     add_library(sm2_imgui INTERFACE)
     target_link_libraries(sm2_imgui INTERFACE imgui::imgui SDL3::SDL3)
@@ -500,6 +542,18 @@ if(SM2_PLATFORM_IOS)
         BUILD_COMMAND   ${sm2_host_env} ${CMAKE_COMMAND} --build <BINARY_DIR>
         INSTALL_COMMAND ${sm2_host_env} ${CMAKE_COMMAND} --install <BINARY_DIR>)
 endif()
+set(_sm2_m68k_extra_args "")
+if(CMAKE_HOST_WIN32 AND CMAKE_CROSSCOMPILING)
+    find_program(_sm2_host_win_cc NAMES cl gcc NO_CMAKE_PATH NO_CMAKE_ENVIRONMENT_PATH)
+    if(NOT _sm2_host_win_cc)
+        list(APPEND _sm2_m68k_extra_args
+            CMAKE_GENERATOR "Visual Studio 17 2022"
+            CMAKE_GENERATOR_PLATFORM "x64"
+            BUILD_COMMAND "${CMAKE_COMMAND}" --build <BINARY_DIR> --config Release
+            INSTALL_COMMAND "${CMAKE_COMMAND}" --install <BINARY_DIR> --config Release
+        )
+    endif()
+endif()
 ExternalProject_Add(m68kmake_host
     ${sm2_host_generator}
     SOURCE_DIR   "${CMAKE_SOURCE_DIR}/cmake/m68kmake-host"
@@ -507,6 +561,7 @@ ExternalProject_Add(m68kmake_host
         "-DCMAKE_BUILD_TYPE=Release"
         "-DSM2_M68KMAKE_SRC=${SM2_MUSASHI_DIR}/m68kmake.c"
         "-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>"
+    ${_sm2_m68k_extra_args}
     BUILD_ALWAYS OFF
     INSTALL_DIR  "${CMAKE_BINARY_DIR}/m68kmake-host-install"
 )
@@ -579,7 +634,7 @@ endif()
 # ImGui does not do. HarfBuzz is static on Windows and macOS so the packages
 # carry no extra library; SheenBidi is rarely packaged, so always vendored.
 
-if(WIN32 OR APPLE)
+if(WIN32 OR APPLE OR ANDROID)
     set(harfbuzz_FOUND FALSE)
 else()
     find_package(PkgConfig QUIET)

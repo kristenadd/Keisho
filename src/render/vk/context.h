@@ -73,6 +73,9 @@ public:
     /// Rebuild the swapchain against the window's current drawable size.
     [[nodiscard]] bool recreate_swapchain();
 
+    /// Recreate VkSurfaceKHR and swapchain after VK_ERROR_SURFACE_LOST_KHR.
+    [[nodiscard]] bool recreate_surface();
+
     /// Block until the device is idle. Renderers call this before destroying
     /// anything a submitted command buffer may still use.
     void wait_idle();
@@ -196,11 +199,13 @@ private:
 
     u32  m_frame_index      = 0;
     u32  m_image_index      = 0;
-    bool m_frame_active     = false;
-    bool m_vsync            = true;
-    bool m_needs_recreation = false;
-    bool m_portability       = false;
-    bool m_metal_objects     = false;
+    bool m_frame_active              = false;
+    bool m_vsync                     = true;
+    bool m_needs_recreation          = false;
+    bool m_surface_lost              = false;
+    bool m_suboptimal_from_transform = false;
+    bool m_portability               = false;
+    bool m_metal_objects             = false;
 
     // -- GPU stage timing ----------------------------------------------------
     // Two queries per stage (begin, end), one set per frame in flight. A zero

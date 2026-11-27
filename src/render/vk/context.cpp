@@ -327,8 +327,10 @@ void Context::shutdown()
 
 bool Context::create_instance(const ContextConfig& config)
 {
+    const auto enumerate_version = reinterpret_cast<PFN_vkEnumerateInstanceVersion>(
+        vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkEnumerateInstanceVersion"));
     u32 loader_version = VK_API_VERSION_1_0;
-    if (vkEnumerateInstanceVersion(&loader_version) != VK_SUCCESS) {
+    if (enumerate_version == nullptr || enumerate_version(&loader_version) != VK_SUCCESS) {
         loader_version = VK_API_VERSION_1_0;
     }
     if (loader_version < VK_API_VERSION_1_1) {
@@ -353,6 +355,7 @@ bool Context::create_instance(const ContextConfig& config)
     const std::vector<VkExtensionProperties> available = instance_extensions();
 
     VkInstanceCreateFlags create_flags = 0;
+#ifdef VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
     if (has_extension(available, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
         // Without this the loader hides portability-subset drivers such as
         // MoltenVK.
@@ -360,6 +363,7 @@ bool Context::create_instance(const ContextConfig& config)
         create_flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
         m_portability = true;
     }
+#endif
 
     bool want_validation = config.enable_validation;
     if (want_validation) {
@@ -516,13 +520,19 @@ bool Context::select_physical_device(const ContextConfig& config)
             }
         }
 
+        const auto get_features2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
+            vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceFeatures2"));
+        if (get_features2 == nullptr) {
+            SM2_DEBUG("skipping '%s': vkGetPhysicalDeviceFeatures2 unavailable", properties.deviceName);
+            continue;
+        }
         VkPhysicalDeviceVulkan13Features features13{};
         features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
         ExtensionFeatures extension_features;
         VkPhysicalDeviceFeatures2 features2{};
         features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
         features2.pNext = core13 ? static_cast<void*>(&features13) : extension_features.chain(nullptr);
-        vkGetPhysicalDeviceFeatures2(candidate, &features2);
+        get_features2(candidate, &features2);
 
         const bool features_ok =
             core13 ? features13.dynamicRendering == VK_TRUE && features13.synchronization2 == VK_TRUE
@@ -852,9 +862,31 @@ bool Context::create_present_semaphores()
 
 bool Context::create_swapchain(VkSwapchainKHR old_swapchain)
 {
+    const auto surface_call = [&](VkResult res, const char* what) -> bool {
+        if (res == VK_SUCCESS) {
+            return true;
+        }
+        if (res == VK_ERROR_SURFACE_LOST_KHR) {
+            SM2_WARN("swapchain: %s lost the surface (%s); will recreate",
+                     what, result_string(res));
+            m_surface_lost = true;
+            return false;
+        }
+        SM2_ERROR("%s failed: %s", what, result_string(res));
+        return false;
+    };
+
+    if (m_surface == VK_NULL_HANDLE) {
+        m_surface_lost = true;
+        return false;
+    }
+
     VkSurfaceCapabilitiesKHR capabilities{};
-    SM2_VK_TRY(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_physical_device, m_surface,
-                                                         &capabilities));
+    if (!surface_call(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_physical_device, m_surface,
+                                                                &capabilities),
+                      "vkGetPhysicalDeviceSurfaceCapabilitiesKHR")) {
+        return false;
+    }
 
     // -- extent ----------------------------------------------------------
     VkExtent2D extent = capabilities.currentExtent;
@@ -876,11 +908,17 @@ bool Context::create_swapchain(VkSwapchainKHR old_swapchain)
 
     // -- format ----------------------------------------------------------
     u32 format_count = 0;
-    SM2_VK_TRY(vkGetPhysicalDeviceSurfaceFormatsKHR(m_physical_device, m_surface,
-                                                    &format_count, nullptr));
+    if (!surface_call(vkGetPhysicalDeviceSurfaceFormatsKHR(m_physical_device, m_surface,
+                                                           &format_count, nullptr),
+                      "vkGetPhysicalDeviceSurfaceFormatsKHR")) {
+        return false;
+    }
     std::vector<VkSurfaceFormatKHR> formats(format_count);
-    SM2_VK_TRY(vkGetPhysicalDeviceSurfaceFormatsKHR(m_physical_device, m_surface,
-                                                    &format_count, formats.data()));
+    if (!surface_call(vkGetPhysicalDeviceSurfaceFormatsKHR(m_physical_device, m_surface,
+                                                           &format_count, formats.data()),
+                      "vkGetPhysicalDeviceSurfaceFormatsKHR")) {
+        return false;
+    }
     if (formats.empty()) {
         SM2_ERROR("the surface reports no supported formats");
         return false;
@@ -900,11 +938,17 @@ bool Context::create_swapchain(VkSwapchainKHR old_swapchain)
 
     // -- present mode ----------------------------------------------------
     u32 mode_count = 0;
-    SM2_VK_TRY(vkGetPhysicalDeviceSurfacePresentModesKHR(m_physical_device, m_surface,
-                                                         &mode_count, nullptr));
+    if (!surface_call(vkGetPhysicalDeviceSurfacePresentModesKHR(m_physical_device, m_surface,
+                                                                &mode_count, nullptr),
+                      "vkGetPhysicalDeviceSurfacePresentModesKHR")) {
+        return false;
+    }
     std::vector<VkPresentModeKHR> modes(mode_count);
-    SM2_VK_TRY(vkGetPhysicalDeviceSurfacePresentModesKHR(m_physical_device, m_surface,
-                                                         &mode_count, modes.data()));
+    if (!surface_call(vkGetPhysicalDeviceSurfacePresentModesKHR(m_physical_device, m_surface,
+                                                                &mode_count, modes.data()),
+                      "vkGetPhysicalDeviceSurfacePresentModesKHR")) {
+        return false;
+    }
 
     const auto supports = [&modes](VkPresentModeKHR mode) {
         return std::find(modes.begin(), modes.end(), mode) != modes.end();
@@ -941,6 +985,12 @@ bool Context::create_swapchain(VkSwapchainKHR old_swapchain)
     // No TRANSFER_SRC: frame capture reads PresentPass's native-resolution
     // image instead.
 
+    // Keep UI/touch coordinates unrotated; the compositor handles scanout rotation.
+    const VkSurfaceTransformFlagBitsKHR pre_transform =
+        (capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) != 0
+            ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
+            : capabilities.currentTransform;
+
     VkSwapchainCreateInfoKHR create_info{};
     create_info.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     create_info.surface          = m_surface;
@@ -950,7 +1000,7 @@ bool Context::create_swapchain(VkSwapchainKHR old_swapchain)
     create_info.imageExtent      = extent;
     create_info.imageArrayLayers = 1;
     create_info.imageUsage       = usage;
-    create_info.preTransform     = capabilities.currentTransform;
+    create_info.preTransform     = pre_transform;
     create_info.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     create_info.presentMode      = present_mode;
     create_info.clipped          = VK_TRUE;
@@ -966,7 +1016,10 @@ bool Context::create_swapchain(VkSwapchainKHR old_swapchain)
     }
 
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
-    SM2_VK_TRY(vkCreateSwapchainKHR(m_device, &create_info, nullptr, &swapchain));
+    if (!surface_call(vkCreateSwapchainKHR(m_device, &create_info, nullptr, &swapchain),
+                      "vkCreateSwapchainKHR")) {
+        return false;
+    }
 
     // Only tear the old one down once the new one exists, so a failure above
     // leaves us still able to present.
@@ -1008,10 +1061,14 @@ bool Context::create_swapchain(VkSwapchainKHR old_swapchain)
                           : present_mode == VK_PRESENT_MODE_MAILBOX_KHR   ? "MAILBOX"
                           : present_mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE"
                                                                           : "other";
-    SM2_INFO("swapchain %ux%u, %u images, present mode %s",
-             extent.width, extent.height, actual_count, mode_name);
+    SM2_INFO("swapchain %ux%u, %u images, present mode %s, transform 0x%x (surface 0x%x)",
+             extent.width, extent.height, actual_count, mode_name,
+             static_cast<u32>(pre_transform),
+             static_cast<u32>(capabilities.currentTransform));
 
-    m_needs_recreation = false;
+    m_suboptimal_from_transform = (pre_transform != capabilities.currentTransform);
+    m_needs_recreation          = false;
+    m_surface_lost              = false;
     return true;
 }
 
@@ -1033,10 +1090,65 @@ void Context::wait_idle()
     }
 }
 
+bool Context::recreate_surface()
+{
+    if (m_window == nullptr || m_instance == VK_NULL_HANDLE || m_device == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    m_surface_lost = true;
+    SM2_VK_WARN_ON_FAIL(vkDeviceWaitIdle(m_device));
+
+    destroy_swapchain_views();
+    if (m_swapchain != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(m_device, m_swapchain, nullptr);
+        m_swapchain = VK_NULL_HANDLE;
+    }
+    if (m_surface != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
+        m_surface = VK_NULL_HANDLE;
+    }
+
+    if (!SDL_Vulkan_CreateSurface(m_window->handle(), m_instance, nullptr, &m_surface)) {
+        SM2_WARN("SDL_Vulkan_CreateSurface deferred after surface loss: %s", SDL_GetError());
+        return false;
+    }
+
+    VkBool32 present_supported = VK_FALSE;
+    if (vkGetPhysicalDeviceSurfaceSupportKHR(m_physical_device, m_present_family, m_surface,
+                                             &present_supported) != VK_SUCCESS
+        || present_supported != VK_TRUE) {
+        SM2_ERROR("recreated Vulkan surface is not supported by present queue");
+        vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
+        m_surface = VK_NULL_HANDLE;
+        return false;
+    }
+
+    u32 width = 0;
+    u32 height = 0;
+    m_window->settle_drawable_size(&width, &height);
+    m_surface_lost = false;
+    if (width == 0 || height == 0) {
+        m_needs_recreation = true;
+        return false;
+    }
+
+    if (!create_swapchain(VK_NULL_HANDLE)) {
+        m_needs_recreation = true;
+        return false;
+    }
+    SM2_INFO("recreated Vulkan surface and swapchain (%ux%u)",
+             m_swapchain_extent.width, m_swapchain_extent.height);
+    return true;
+}
+
 bool Context::recreate_swapchain()
 {
     if (m_window == nullptr) {
         return false;
+    }
+    if (m_surface_lost || m_surface == VK_NULL_HANDLE) {
+        return recreate_surface();
     }
 
     u32 width = 0;
@@ -1066,46 +1178,67 @@ bool Context::begin_frame()
         SM2_ERROR("begin_frame called while a frame was already recording");
         return false;
     }
-    if (m_window == nullptr || m_window->minimised()) {
-        return false;
-    }
 
-    // Detect a drawable-size change directly: MoltenVK does not reliably report
-    // OUT_OF_DATE / SUBOPTIMAL on resize (e.g. a macOS fullscreen toggle).
-    {
-        u32 dw = 0;
-        u32 dh = 0;
-        m_window->drawable_size(&dw, &dh);
-        if (dw != 0 && dh != 0
-            && (dw != m_swapchain_extent.width || dh != m_swapchain_extent.height)) {
-            m_needs_recreation = true;
+    u32  image_index = 0;
+    bool acquired    = false;
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        if (m_window == nullptr || m_window->minimised()) {
+            return false;
         }
-    }
+        if ((m_surface_lost || m_surface == VK_NULL_HANDLE) && !recreate_surface()) {
+            return false;
+        }
 
-    if (m_needs_recreation && !recreate_swapchain()) {
-        return false;
-    }
+        // Detect a drawable-size change directly: MoltenVK does not reliably report
+        // OUT_OF_DATE / SUBOPTIMAL on resize (e.g. a macOS fullscreen toggle).
+        {
+            u32 dw = 0;
+            u32 dh = 0;
+            m_window->drawable_size(&dw, &dh);
+            if (dw != 0 && dh != 0
+                && (dw != m_swapchain_extent.width || dh != m_swapchain_extent.height)) {
+                m_needs_recreation = true;
+            }
+        }
 
-    // Wait for the frame that last used this slot, so its command buffer and
-    // per-frame resources are free to overwrite.
-    SM2_VK_TRY(note(vkWaitForFences(m_device, 1, &m_in_flight[m_frame_index], VK_TRUE, UINT64_MAX)));
+        if ((m_needs_recreation || m_swapchain == VK_NULL_HANDLE) && !recreate_swapchain()) {
+            return false;
+        }
 
-    u32            image_index = 0;
-    const VkResult acquire     = note(vkAcquireNextImageKHR(m_device, m_swapchain, UINT64_MAX,
+        // Wait for the frame that last used this slot, so its command buffer and
+        // per-frame resources are free to overwrite.
+        SM2_VK_TRY(note(vkWaitForFences(m_device, 1, &m_in_flight[m_frame_index], VK_TRUE, UINT64_MAX)));
+
+        const VkResult acquire = note(vkAcquireNextImageKHR(m_device, m_swapchain, UINT64_MAX,
                                                             m_image_available[m_frame_index],
                                                             VK_NULL_HANDLE, &image_index));
-    if (acquire == VK_ERROR_OUT_OF_DATE_KHR) {
-        // The semaphore was not signalled, so it is safe to reuse next frame.
-        return recreate_swapchain() ? begin_frame() : false;
+        if (acquire == VK_ERROR_SURFACE_LOST_KHR) {
+            if (!recreate_surface()) {
+                return false;
+            }
+            continue;
+        }
+        if (acquire == VK_ERROR_OUT_OF_DATE_KHR) {
+            // The semaphore was not signalled, so it is safe to reuse next frame.
+            if (!recreate_swapchain()) {
+                return false;
+            }
+            continue;
+        }
+        if (acquire != VK_SUCCESS && acquire != VK_SUBOPTIMAL_KHR) {
+            SM2_ERROR("vkAcquireNextImageKHR failed: %s", result_string(acquire));
+            return false;
+        }
+        if (acquire == VK_SUBOPTIMAL_KHR && !m_suboptimal_from_transform) {
+            // Present anyway this frame, then rebuild; skip when preTransform
+            // intentionally stays IDENTITY on a rotated panel.
+            m_needs_recreation = true;
+        }
+        acquired = true;
+        break;
     }
-    if (acquire != VK_SUCCESS && acquire != VK_SUBOPTIMAL_KHR) {
-        SM2_ERROR("vkAcquireNextImageKHR failed: %s", result_string(acquire));
+    if (!acquired || m_surface_lost || m_swapchain == VK_NULL_HANDLE) {
         return false;
-    }
-    if (acquire == VK_SUBOPTIMAL_KHR) {
-        // Present anyway this frame, then rebuild. Bailing out here would drop
-        // a frame for a condition that is merely inefficient.
-        m_needs_recreation = true;
     }
 
     m_image_index = image_index;
@@ -1193,11 +1326,16 @@ bool Context::end_frame()
     // fence belongs to this slot.
     m_frame_index = (m_frame_index + 1) % kFramesInFlight;
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+    if (result == VK_ERROR_SURFACE_LOST_KHR) {
+        m_surface_lost = true;
+        return true;
+    }
+    if (result == VK_ERROR_OUT_OF_DATE_KHR
+        || (result == VK_SUBOPTIMAL_KHR && !m_suboptimal_from_transform)) {
         m_needs_recreation = true;
         return true;
     }
-    if (result != VK_SUCCESS) {
+    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
         SM2_ERROR("vkQueuePresentKHR failed: %s", result_string(result));
         return false;
     }
@@ -1277,10 +1415,12 @@ std::vector<std::string> Context::enumerate_device_names()
 
     std::vector<const char*> extensions;
     VkInstanceCreateFlags    flags = 0;
+#ifdef VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
     if (has_extension(instance_extensions(), VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
         extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
         flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
     }
+#endif
 
     VkInstanceCreateInfo create_info{};
     create_info.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;

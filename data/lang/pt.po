@@ -343,7 +343,7 @@ msgstr "Áudio"
 #: src/osd/gui.cpp
 #, no-c-format
 msgid "Input"
-msgstr ""
+msgstr "Entrada"
 
 #: src/osd/gui.cpp
 #, no-c-format
@@ -606,6 +606,9 @@ msgid ""
 "<game>.png, the parent set's, or default.png. The picture fills the image's "
 "transparent window."
 msgstr ""
+"Em ecrã inteiro, emoldura a imagem 4:3 com uma imagem da pasta de bezels: "
+"<jogo>.png, do conjunto pai ou default.png. A imagem preenche a janela "
+"transparente."
 
 #: src/osd/gui.cpp
 #, no-c-format
@@ -615,7 +618,7 @@ msgstr "Moldura"
 #: src/osd/gui.cpp
 #, no-c-format
 msgid "Cabinet artwork around the picture in fullscreen."
-msgstr ""
+msgstr "Moldura da máquina (bezel) em redor da imagem em ecrã inteiro."
 
 #: src/osd/gui.cpp
 #, no-c-format
@@ -977,9 +980,10 @@ msgid "Reset all"
 msgstr "Repor tudo"
 
 #: src/osd/gui.cpp
+#: src/osd/gui.cpp
 #, no-c-format
 msgid "Games"
-msgstr ""
+msgstr "Jogos"
 
 #: src/osd/gui.cpp
 #, no-c-format
@@ -1346,7 +1350,7 @@ msgstr ""
 #: src/osd/gui.cpp
 #, no-c-format
 msgid "Model 1 ROM folder"
-msgstr ""
+msgstr "Pasta de ROMs Model 1"
 
 #: src/osd/gui.cpp
 #, no-c-format
@@ -1361,12 +1365,12 @@ msgstr ""
 #: src/osd/gui.cpp
 #, no-c-format
 msgid "Model 2 ROM folder"
-msgstr ""
+msgstr "Pasta de ROMs Model 2"
 
 #: src/osd/gui.cpp
 #, no-c-format
 msgid "One zip or 7z per game, named as in MAME."
-msgstr ""
+msgstr "Um zip ou 7z por jogo, com o nome do MAME."
 
 #: src/osd/gui.cpp
 #, no-c-format
@@ -1378,12 +1382,12 @@ msgstr ""
 #: src/osd/gui.cpp
 #, no-c-format
 msgid "not set"
-msgstr ""
+msgstr "não definida"
 
 #: src/osd/gui.cpp
 #, no-c-format
 msgid "Model 3 ROM folder"
-msgstr ""
+msgstr "Pasta de ROMs Model 3"
 
 #: src/osd/gui.cpp
 #, no-c-format
@@ -1403,7 +1407,7 @@ msgstr ""
 #: src/osd/gui.cpp
 #, no-c-format
 msgid "Saves"
-msgstr ""
+msgstr "Gravações"
 
 #: src/osd/gui.cpp
 #, no-c-format
@@ -1572,7 +1576,7 @@ msgstr "Notificações"
 #: src/osd/gui.cpp
 #, no-c-format
 msgid "Play"
-msgstr ""
+msgstr "Jogar"
 
 #: src/osd/gui.cpp
 #, no-c-format
@@ -3006,7 +3010,7 @@ msgstr "Cancelar"
 #: src/osd/gui.cpp
 #, no-c-format
 msgid "All"
-msgstr ""
+msgstr "Todos"
 
 #: src/osd/gui.cpp
 #, c-format
@@ -3113,7 +3117,932 @@ msgstr ""
 #: src/osd/ui/theme.cpp
 #, no-c-format
 msgid "black, white and yellow; heavier lines"
+msgstr "preto, branco e amarelo; linhas mais fortes"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Set ROM Folder..."
+msgstr "Definir pasta de ROMs..."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Resume"
+msgstr "Retomar"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "On-screen gamepad"
+msgstr "Comando no ecrã"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Virtual gamepad"
+msgstr "Comando virtual"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Multi-touch overlay controls."
+msgstr "Controlos táteis multi-toque no ecrã."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Automatic"
+msgstr "Automático"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Opacity"
+msgstr "Opacidade"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Transparency of the on-screen buttons."
+msgstr "Transparência dos botões no ecrã."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Button size"
+msgstr "Tamanho dos botões"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Scale of the on-screen sticks and buttons."
+msgstr "Escala dos analógicos e botões no ecrã."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "No Model 2 ROM archives were found in the ROM folder. Copy .zip or .7z ROM sets there or pick another folder in Settings > Paths."
+msgstr "Nenhuma ROM Model 2 foi encontrada nesta pasta. Copie ficheiros .zip ou .7z para lá ou escolha outra pasta em Definições > Caminhos."
+
+#: src/osd/gui.cpp
+#, c-format
+msgid "Current ROM folder: %s"
+msgstr "Pasta de ROMs atual: %s"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Tap a game to select, then tap Play (or tap twice) to launch."
+msgstr "Toque num jogo para selecionar e depois em Jogar (ou toque duas vezes) para iniciar."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Allow Access"
+msgstr "Permitir acesso"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Shared storage"
+msgstr "Armazenamento partilhado"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Needed only for folders outside the app's own ROM folder."
+msgstr "Necessário apenas para pastas fora da pasta própria da app."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Shared storage (/sdcard) access is granted."
+msgstr "Acesso ao armazenamento partilhado (/sdcard) concedido."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "App ROMs"
+msgstr "ROMs da app"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Shared Storage"
+msgstr "Armazenamento"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Video"
+msgstr "Vídeo"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Find"
+msgstr "Procurar"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Scan"
+msgstr "Analisar"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "ROMs"
+msgstr "ROMs"
+
+#: src/osd/gui.cpp
+#, c-format
+msgid "%zu ROM"
+msgid_plural "%zu ROMs"
+msgstr[0] "%zu ROM"
+msgstr[1] "%zu ROMs"
+
+#: src/osd/gui.cpp
+#, c-format
+msgid "%d / %zu   ·   %s.zip"
+msgstr "%d / %zu   ·   %s.zip"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Search games..."
+msgstr "Pesquisar jogos..."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Grant files access"
+msgstr "Ativar acesso aos ficheiros"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Files access needed to read ROM .zip archives in shared folders."
+msgstr "É necessário acesso aos ficheiros para ler ROMs (.zip) em pastas partilhadas."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Files access is disabled. Grant 'All files access' so Keisho can read shared .zip ROMs."
+msgstr "O acesso aos ficheiros está desativado. Ative 'Acesso a todos os ficheiros' para ler ROMs partilhadas."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "No Model 2 ROM archives were found in the ROM folder. Copy .zip or .7z ROM sets there or pick another folder."
+msgstr "Nenhuma ROM Model 2 foi encontrada nesta pasta. Copie ficheiros .zip ou .7z para lá ou escolha outra pasta."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Browse ROMs / archives..."
+msgstr "Escolher pasta / ROMs..."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "App folder"
+msgstr "Pasta App"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Storage"
+msgstr "Armazenamento"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Parent folder"
+msgstr "Pasta anterior"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Tap a folder to open, or tap a .zip/.7z file to launch it directly."
+msgstr "Toque numa pasta para abrir, ou num ficheiro .zip/.7z para iniciar diretamente."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Cannot list this directory (permission denied, or it doesn't exist)."
+msgstr "Não foi possível abrir esta pasta (sem permissão ou inexistente)."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Quick save"
+msgstr "Gravação rápida"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Empty"
+msgstr "Vazio"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Game"
+msgstr "Jogo"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Launch a game first to save or load states into quick and numbered slots."
+msgstr "Inicie primeiro um jogo para gravar ou carregar nas ranhuras."
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "SETTINGS"
+msgstr "MENU"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "EXIT"
+msgstr "SAIR"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "VIEW"
+msgstr "CÂMARA"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "COIN"
+msgstr "MOEDA"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "SAVE"
+msgstr "GRAVAR"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "SLOT"
+msgstr "SLOT"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "LOAD"
+msgstr "ABRIR"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "GAS"
+msgstr "ACEL."
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "BRAKE"
+msgstr "TRAVÃO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "GEAR-"
+msgstr "M-"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "GEAR+"
+msgstr "M+"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "MSL"
+msgstr "MÍSSIL"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "RELOAD"
+msgstr "RECAR."
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "FIRE"
+msgstr "FOGO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "SERVICE"
+msgstr "SERVICE"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "TEST"
+msgstr "TEST"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "H.BRAKE"
+msgstr "TRAV. MÃO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "MUSIC"
+msgstr "MÚSICA"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "PUNCH"
+msgstr "MURRO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "KICK"
+msgstr "PONTAPÉ"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "GUARD"
+msgstr "DEFESA"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "ESC"
+msgstr "ESQUIVA"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "BEAT"
+msgstr "ATAQUE"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "CHARGE"
+msgstr "CARREGAR"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "SHIFT"
+msgstr "DESVIO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "JUMP"
+msgstr "SALTO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "L.PASS"
+msgstr "P. LONGO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "SHOOT"
+msgstr "REMATE"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "S.PASS"
+msgstr "P. CURTO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "SHOT"
+msgstr "TIRO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "BOMB"
+msgstr "BOMBA"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "SWING"
+msgstr "TACADA"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "BUNT"
+msgstr "TOQUE"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "RUN"
+msgstr "CORRER"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "BAT"
+msgstr "TACO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "TENSION"
+msgstr "TENSÃO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "REEL"
+msgstr "CARRETO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "CAST"
+msgstr "LANÇAR"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "SELECT"
+msgstr "SELEC."
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "PEDAL"
+msgstr "PEDAL"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "POLE L"
+msgstr "BAST. E"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "POLE R"
+msgstr "BAST. D"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "PITCH L"
+msgstr "INCL. E"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "PITCH R"
+msgstr "INCL. D"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "JUMP F"
+msgstr "SALTO F"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "JUMP T"
+msgstr "SALTO T"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "SLIDE L"
+msgstr "DESL. E"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "SLIDE R"
+msgstr "DESL. D"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "TRIG 1"
+msgstr "GAT. 1"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "TRIG 2"
+msgstr "GAT. 2"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "EVT 1"
+msgstr "EVT 1"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "EVT 2"
+msgstr "EVT 2"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "M.GUN"
+msgstr "METRALH."
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "SMOKE"
+msgstr "FUMO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "LASER"
+msgstr "LASER"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "TORPEDO"
+msgstr "TORPEDO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "THR-"
+msgstr "ACEL.-"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "THR+"
+msgstr "ACEL.+"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "CANNON"
+msgstr "CANHÃO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "FWD"
+msgstr "FRENTE"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "REV"
+msgstr "RÉ"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "ENTRY"
+msgstr "ENTRAR"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "CALL"
+msgstr "CHAMAR"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "ERR"
+msgstr "ERRO"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "NET"
+msgstr "REDE"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "ROM Folders"
+msgstr "Pastas de ROMs"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid ""
+"Select a folder for each system. Each folder only scans and shows games "
+"belonging to that model (even inside a 4000-game MAME folder)."
 msgstr ""
+"Escolha uma pasta para cada sistema. Cada pasta só reconhece e mostra jogos "
+"desse modelo (mesmo dentro de uma pasta MAME com 4000 jogos)."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid ""
+"Select a ROM folder for each system. Each folder only scans and shows games "
+"of its own model (even inside a shared MAME folder)."
+msgstr ""
+"Escolha uma pasta de ROMs para cada sistema. Cada pasta só reconhece e mostra "
+"jogos desse modelo (mesmo dentro de uma pasta MAME partilhada)."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Only Model 1 games are scanned and shown from this folder."
+msgstr "Apenas jogos Model 1 são lidos e mostrados desta pasta."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Only Model 2 games are scanned and shown from this folder."
+msgstr "Apenas jogos Model 2 são lidos e mostrados desta pasta."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Only Model 3 games are scanned and shown from this folder."
+msgstr "Apenas jogos Model 3 são lidos e mostrados desta pasta."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "No Model 1 ROMs found in the Model 1 folder."
+msgstr "Nenhuma ROM Model 1 foi encontrada na pasta do Model 1."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "No Model 2 ROMs found in the Model 2 folder."
+msgstr "Nenhuma ROM Model 2 foi encontrada na pasta do Model 2."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "No Model 3 ROMs found in the Model 3 folder."
+msgstr "Nenhuma ROM Model 3 foi encontrada na pasta do Model 3."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "No Model 1, 2 or 3 ROM archives were found. Select a ROM folder for each system."
+msgstr "Nenhuma ROM Model 1, 2 ou 3 foi encontrada. Escolha a pasta de ROMs para cada sistema."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Folders"
+msgstr "Pastas"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "ROM & Cover Folders"
+msgstr "Pastas de ROMs e Capas"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid ""
+"Select a ROM folder and optional covers folder for each system. ROM folders "
+"only show games matching that model, and cover image file names must match the "
+"ROM name."
+msgstr ""
+"Escolha uma pasta de ROMs e uma pasta opcional de capas para cada sistema. "
+"Cada pasta só mostra jogos desse modelo e as imagens têm de ter o mesmo nome "
+"da ROM."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Covers"
+msgstr "Capas"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid ""
+"Select a local covers folder for each model. Image files (.png, .jpg, .bmp, "
+".tga) must match the ROM file name (e.g. daytona.png)."
+msgstr ""
+"Escolha uma pasta local de capas para cada modelo. As imagens (.png, .jpg, "
+".bmp, .tga) têm de ter o mesmo nome do ficheiro ROM (ex.: daytona.png)."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Model 1 covers folder"
+msgstr "Pasta de capas Model 1"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Model 2 covers folder"
+msgstr "Pasta de capas Model 2"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Model 3 covers folder"
+msgstr "Pasta de capas Model 3"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Local cover images matching Model 1 ROM file names."
+msgstr "Imagens locais de capas com os nomes das ROMs Model 1."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Local cover images matching Model 2 ROM file names."
+msgstr "Imagens locais de capas com os nomes das ROMs Model 2."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Local cover images matching Model 3 ROM file names."
+msgstr "Imagens locais de capas com os nomes das ROMs Model 3."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid ""
+"Open the covers folder and tap 'Select This Folder'. Images must match the "
+"ROM file name (e.g. daytona.png)."
+msgstr ""
+"Abra a pasta das capas e toque em 'Selecionar esta pasta'. As imagens têm de "
+"ter o mesmo nome do ficheiro ROM (ex.: daytona.png)."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid ""
+"Frame the 4:3 picture with an image from that model's bezels folder: "
+"<game>.png, the parent set's, or default.png. The picture fills the image's "
+"transparent window."
+msgstr ""
+"Emoldura a imagem 4:3 com uma imagem da pasta de bezels desse modelo: "
+"<jogo>.png, do jogo pai ou default.png. A imagem preenche a janela "
+"transparente."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Cabinet artwork around the picture."
+msgstr "Moldura da máquina (bezel) em redor da imagem."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid ""
+"Folders for Model 1 ROMs, local covers (<rom>.png/.jpg) and bezels "
+"(<game>.png or default.png)."
+msgstr ""
+"Pastas para ROMs, capas locais (<rom>.png/.jpg) e bezels (<jogo>.png ou "
+"default.png) do Model 1."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid ""
+"Folders for Model 2 ROMs, local covers (<rom>.png/.jpg) and bezels "
+"(<game>.png or default.png)."
+msgstr ""
+"Pastas para ROMs, capas locais (<rom>.png/.jpg) e bezels (<jogo>.png ou "
+"default.png) do Model 2."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid ""
+"Folders for Model 3 ROMs, local covers (<rom>.png/.jpg) and bezels "
+"(<game>.png or default.png)."
+msgstr ""
+"Pastas para ROMs, capas locais (<rom>.png/.jpg) e bezels (<jogo>.png ou "
+"default.png) do Model 3."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Model 1 bezels folder"
+msgstr "Pasta de bezels Model 1"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Model 2 bezels folder"
+msgstr "Pasta de bezels Model 2"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Model 3 bezels folder"
+msgstr "Pasta de bezels Model 3"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Model 1 bezel images: <game>.png, the parent set's, or default.png."
+msgstr "Imagens bezel Model 1: <jogo>.png, do conjunto pai ou default.png."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Model 2 bezel images: <game>.png, the parent set's, or default.png."
+msgstr "Imagens bezel Model 2: <jogo>.png, do conjunto pai ou default.png."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Model 3 bezel images: <game>.png, the parent set's, or default.png."
+msgstr "Imagens bezel Model 3: <jogo>.png, do conjunto pai ou default.png."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid ""
+"Open the bezels folder (e.g. bezel_day) and tap 'Select This Folder'. Images "
+"use <game>.png or default.png."
+msgstr ""
+"Abra a pasta dos bezels (ex.: bezel_day) e toque em 'Selecionar esta pasta'. "
+"As imagens usam <jogo>.png ou default.png."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Model Folders"
+msgstr "Pastas por Modelo"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid ""
+"Set ROMs, covers and bezels folders independently for each model. Cover "
+"files must match the ROM name."
+msgstr ""
+"Defina de forma independente as pastas de ROMs, capas e bezels para cada "
+"modelo. As capas têm de ter o mesmo nome do ficheiro ROM."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Gun touch aim"
+msgstr "Mira tátil (pistola)"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Direct touch"
+msgstr "Toque direto"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Analog stick"
+msgstr "Analógico fixo"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Direct screen touch or fixed corner stick."
+msgstr "Toque direto no ecrã ou analógico fixo no canto."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid ""
+"Touch the screen directly to aim and fire, or move the sight from a fixed "
+"corner analog stick without fingers covering the game."
+msgstr ""
+"Toque diretamente no ecrã para apontar e disparar, ou mova a mira a partir de "
+"um analógico fixo no canto sem tapar o jogo com os dedos."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Stick aim sensitivity"
+msgstr "Sensibilidade do analógico (mira)"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Speed and response of analog-stick aiming in light-gun games (virtual stick or gamepad)."
+msgstr "Velocidade e resposta da mira por analógico nos jogos de tiro (analógico tátil ou comando)."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Shared bezels"
+msgstr "Bezels partilhados"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Fallback bezel images when no per-model bezels folder is set: <game>.png, the parent set's, or default.png."
+msgstr "Pasta alternativa de bezels quando nenhuma pasta por modelo está definida: <jogo>.png, do set pai, ou default.png."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Fullscreen only."
+msgstr "Só em ecrã inteiro."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid ""
+"In fullscreen, frame the 4:3 picture with an image from that model's bezels folder: "
+"<game>.png, the parent set's, or default.png. The picture fills the image's "
+"transparent window."
+msgstr ""
+"Em ecrã inteiro, emoldura a imagem 4:3 com uma imagem da pasta de bezels desse modelo: "
+"<jogo>.png, do conjunto pai ou default.png. A imagem preenche a janela "
+"transparente."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Buttons for"
+msgstr "Botões para"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Invert stick"
+msgstr "Inverter stick"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Flip horizontal (X), vertical (Y), or both directions."
+msgstr "Inverter horizontal (X), vertical (Y) ou ambos os sentidos."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Invert left/right (Horizontal), up/down (Vertical), or both stick axes for this game. Applies to both the on-screen stick and physical gamepads."
+msgstr "Inverte esquerda/direita (Horizontal), cima/baixo (Vertical) ou ambos os eixos do stick neste jogo. Aplica-se ao stick tátil e a comandos físicos."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Horizontal"
+msgstr "Horizontal"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Vertical"
+msgstr "Vertical"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Both"
+msgstr "Ambos"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Drives"
+msgstr "Unidades"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Every game uses the default on-screen controls until you hide or customize buttons for it here."
+msgstr "Cada jogo usa os controlos no ecrã predefinidos até ocultar ou personalizar botões para ele aqui."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Toggle individual on-screen controls for this game. Menu and exit remain visible so you can always get back."
+msgstr "Mostre ou oculte individualmente os controlos táteis para este jogo. O menu e sair ficam sempre visíveis para poder regressar."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Show all"
+msgstr "Mostrar todos"
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Applies to games using the default layout."
+msgstr "Aplica-se aos jogos que usam a disposição predefinida."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Uses the default visibility until a control is hidden."
+msgstr "Usa a visibilidade predefinida até ocultar um controlo."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Custom visibility saved for this game."
+msgstr "Visibilidade personalizada guardada para este jogo."
+
+#: src/osd/gui.cpp
+#, no-c-format
+msgid "Visible buttons"
+msgstr "Botões visíveis"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "Left stick"
+msgstr "Analógico esquerdo"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "Right stick"
+msgstr "Analógico direito"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "SAVE / SLOT / LOAD"
+msgstr "GRAVAR / SLOT / ABRIR"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "SERVICE / TEST"
+msgstr "SERVICE / TEST"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "FPS"
+msgstr "FPS"
+
+#: src/osd/touch_gamepad.cpp
+#, no-c-format
+msgid "START"
+msgstr "START"
 
 #, no-c-format
 #~ msgid "Show bindings"

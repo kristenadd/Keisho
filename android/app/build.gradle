@@ -1,0 +1,95 @@
+plugins {
+    id 'com.android.application'
+}
+
+def generatedAssetsDir = layout.buildDirectory.dir("generated/assets/keisho")
+def generatedSdlJavaDir = layout.buildDirectory.dir("generated/java/sdl")
+
+tasks.register('syncKeishoAssets', Sync) {
+    from('../../data/games.xml')
+    from('../../data/lang') {
+        into 'lang'
+        include '*.po', 'fonts/*.ttf', 'fonts/OFL.txt'
+    }
+    into generatedAssetsDir
+}
+
+tasks.register('syncSdlJava', Sync) {
+    from('../../3rdparty/SDL/android-project/app/src/main/java/org/libsdl/app') {
+        into 'org/libsdl/app'
+        include '*.java'
+    }
+    into generatedSdlJavaDir
+}
+
+android {
+    namespace = "io.github.keisho_emu.keisho"
+    compileSdk = 35
+    ndkVersion = "29.0.14206865"
+
+    defaultConfig {
+        applicationId "io.github.keisho_emu.keisho"
+        minSdk = 24
+        targetSdk = 35
+        versionCode 2
+        versionName "0.9.63"
+
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_PLATFORM=android-24",
+                          "-DANDROID_STL=c++_static",
+                          "-DSM2_BUILD_OPENGL_DESKTOP=OFF",
+                          "-DSM2_BUILD_OPENGL_ES=ON",
+                          "-DSM2_BUILD_VULKAN=ON",
+                          "-DSM2_BUILD_TESTS=OFF"
+                abiFilters 'arm64-v8a'
+            }
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            externalNativeBuild {
+                cmake {
+                    arguments "-DCMAKE_BUILD_TYPE=Release"
+                }
+            }
+        }
+        debug {
+            externalNativeBuild {
+                cmake {
+                    arguments "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
+                }
+            }
+        }
+    }
+
+    sourceSets {
+        main {
+            assets.srcDirs += generatedAssetsDir
+            java.srcDirs += generatedSdlJavaDir
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "../../CMakeLists.txt"
+            version "3.24.0+"
+        }
+    }
+
+    lint {
+        abortOnError = false
+    }
+}
+
+preBuild.dependsOn(syncKeishoAssets, syncSdlJava)

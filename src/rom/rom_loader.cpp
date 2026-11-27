@@ -30,8 +30,8 @@ extern "C" {
 }
 
 #include <algorithm>
-#include <cstdio>
 #include <cctype>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -64,15 +64,24 @@ struct ZipEntry {
 /// extension, so a 7z named `.zip` (or the reverse) still loads.
 enum class ArchiveFormat {
     Unknown,
+    PermissionDenied,
+    OpenFailed,
     Zip,
     SevenZip,
 };
 
-[[nodiscard]] ArchiveFormat sniff_archive_format(const std::string& path)
+[[nodiscard]] ArchiveFormat sniff_archive_format(const std::string& path, int* open_errno = nullptr)
 {
+    errno = 0;
     std::FILE* handle = std::fopen(path.c_str(), "rb");
     if (handle == nullptr) {
-        return ArchiveFormat::Unknown;
+        const int err = errno;
+        if (open_errno != nullptr) {
+            *open_errno = err;
+        }
+        return (err == EACCES || err == EPERM)
+                 ? ArchiveFormat::PermissionDenied
+                 : ArchiveFormat::OpenFailed;
     }
     u8   header[8] = {};
     const usize read = std::fread(header, 1, sizeof(header), handle);
@@ -166,11 +175,21 @@ public:
 
     [[nodiscard]] bool open(const std::string& path)
     {
-        switch (sniff_archive_format(path)) {
+        m_permission_denied = false;
+        int err             = 0;
+        switch (sniff_archive_format(path, &err)) {
             case ArchiveFormat::Zip:
                 return open_zip(path);
             case ArchiveFormat::SevenZip:
                 return open_seven_zip(path);
+            case ArchiveFormat::PermissionDenied:
+                m_permission_denied = true;
+                SM2_ERROR("permission denied reading '%s' (errno=%d); grant external storage access",
+                          path.c_str(), err);
+                return false;
+            case ArchiveFormat::OpenFailed:
+                SM2_ERROR("could not open '%s' for reading (errno=%d)", path.c_str(), err);
+                return false;
             case ArchiveFormat::Unknown:
                 SM2_ERROR("'%s' is not a zip or 7z archive (unrecognised signature)",
                           path.c_str());
@@ -179,16 +198,15 @@ public:
         return false;
     }
 
+    [[nodiscard]] bool permission_denied() const { return m_permission_denied; }
+
     /// Find an entry, by CRC when the database declares one and by name
     /// otherwise. Matching on CRC is the verification.
     [[nodiscard]] const ZipEntry* find(const FileSpec& file) const
     {
         if (file.has_crc) {
             const auto entry = m_by_crc.find(file.crc32);
-            if (entry != m_by_crc.end()) {
-                return &entry->second;
-            }
-            return nullptr;
+            return entry != m_by_crc.end() ? &entry->second : nullptr;
         }
         const auto entry = m_by_name.find(to_lower(file.name));
         return entry != m_by_name.end() ? &entry->second : nullptr;
@@ -369,9 +387,10 @@ private:
     // Deques, not vectors: both archive types hold self pointers once opened
     // and must never be relocated.
     std::deque<mz_zip_archive>                m_zip_archives;
-    std::deque<SevenZipArchive>                m_seven_zip_archives;
+    std::deque<SevenZipArchive>               m_seven_zip_archives;
     std::unordered_map<u32, ZipEntry>         m_by_crc;
     std::unordered_map<std::string, ZipEntry> m_by_name;
+    bool                                      m_permission_denied = false;
 };
 
 /// How completely an archive satisfies a game definition.
@@ -634,9 +653,77 @@ std::optional<LoadResult> RomLoader::load(const GameDatabase& database,
 
     ArchiveSet archives;
     if (!archives.open(archive_path)) {
-        failure.message = file_name + " could not be read as a zip or 7z archive.";
+        failure.message = archives.permission_denied()
+#if defined(__ANDROID__)
+                            ? file_name + ": permission denied. Enable 'All files access' for Keisho in Android Settings."
+#else
+                            ? file_name + ": permission denied reading archive."
+#endif
+                            : file_name + " could not be read as a zip or 7z archive.";
         return std::nullopt;
     }
+
+    // A sibling archive named `stem`, preferring zip but accepting 7z.
+    const auto find_sibling_archive =
+        [&archive_path](const std::string& stem) -> std::optional<std::filesystem::path> {
+        const std::filesystem::path directory =
+            std::filesystem::path(archive_path).parent_path();
+        for (const char* extension : {".zip", ".7z"}) {
+            std::error_code exists_error;
+            const std::filesystem::path candidate = directory / (stem + extension);
+            if (std::filesystem::exists(candidate, exists_error)) {
+                return candidate;
+            }
+        }
+        return std::nullopt;
+    };
+
+    std::vector<std::string> missing_devices;
+    const auto open_support_archives = [&](const GameSpec& spec) -> bool {
+        // -- open the parent archive if needed ---------------------------------
+        if (!spec.parent.empty() && !score_game(archives, spec).complete()) {
+            if (const auto parent_path = find_sibling_archive(spec.parent)) {
+                SM2_INFO("'%s' is a clone; also reading %s", spec.name.c_str(),
+                         parent_path->string().c_str());
+                if (!archives.open(parent_path->string())) {
+                    failure.game    = spec.name;
+                    failure.message = parent_path->filename().string() + " could not be read.";
+                    return false;
+                }
+            } else {
+                SM2_WARN("'%s' is a clone of '%s' and some chips are missing, but "
+                         "no %s.zip or %s.7z was found beside the archive",
+                         spec.name.c_str(), spec.parent.c_str(),
+                         spec.parent.c_str(), spec.parent.c_str());
+            }
+        }
+        // -- open any device ROM sets ------------------------------------------
+        // Device firmware (the I/O board's Z80 program) is bundled into most game
+        // archives but lives only in the device set in a MAME split set, so a
+        // device set is read only when the game is still short of files.
+        for (const std::string& device_set : spec.device_sets) {
+            if (score_game(archives, spec).complete()) {
+                break;
+            }
+            if (const auto device_path = find_sibling_archive(device_set)) {
+                SM2_INFO("'%s' needs the '%s' device set; also reading %s",
+                         spec.name.c_str(), device_set.c_str(),
+                         device_path->string().c_str());
+                if (!archives.open(device_path->string())) {
+                    failure.game    = spec.name;
+                    failure.message = device_path->filename().string() + " could not be read.";
+                    return false;
+                }
+            } else {
+                missing_devices.push_back(device_set);
+                SM2_WARN("'%s' is missing files that the '%s' device ROM set holds, but "
+                         "no %s.zip or %s.7z was found beside the archive",
+                         spec.name.c_str(), device_set.c_str(), device_set.c_str(),
+                         device_set.c_str());
+            }
+        }
+        return true;
+    };
 
     // -- pick a game -------------------------------------------------------
     const GameSpec* chosen = nullptr;
@@ -647,6 +734,35 @@ std::optional<LoadResult> RomLoader::load(const GameDatabase& database,
             SM2_ERROR("'%s' is not in the ROM database", preferred_game.c_str());
             failure.message = "'" + preferred_game + "' is not a game Keisho knows.";
             return std::nullopt;
+        }
+    } else if (const GameSpec* by_stem = database.find(archive_stem);
+               by_stem != nullptr && score_game(archives, *by_stem).found > 0) {
+        // Prefer the set matching the archive stem on merged sets.
+        chosen = by_stem;
+    }
+
+    if (chosen != nullptr) {
+        if (!open_support_archives(*chosen)) {
+            return std::nullopt;
+        }
+        // Fall back to a complete revision of the same family if the stem set is incomplete.
+        if (!score_game(archives, *chosen).complete()) {
+            const std::string family_root =
+                chosen->parent.empty() ? chosen->name : chosen->parent;
+            for (const GameSpec& candidate : database.games()) {
+                if (candidate.name == chosen->name) {
+                    continue;
+                }
+                const bool same_family = candidate.name == family_root
+                                      || candidate.parent == family_root;
+                if (same_family && score_game(archives, candidate).complete()) {
+                    SM2_INFO("'%s' matched complete revision '%s' inside %s",
+                             chosen->name.c_str(), candidate.name.c_str(),
+                             file_name.c_str());
+                    chosen = &candidate;
+                    break;
+                }
+            }
         }
     } else {
         const GameSpec* best       = nullptr;
@@ -695,66 +811,8 @@ std::optional<LoadResult> RomLoader::load(const GameDatabase& database,
                      archive_path.c_str(), best->name.c_str(), best_score.missing);
         }
         chosen = best;
-    }
-
-    // A sibling archive named `stem`, preferring zip but accepting 7z.
-    const auto find_sibling_archive =
-        [&archive_path](const std::string& stem) -> std::optional<std::filesystem::path> {
-        const std::filesystem::path directory =
-            std::filesystem::path(archive_path).parent_path();
-        for (const char* extension : {".zip", ".7z"}) {
-            std::error_code exists_error;
-            const std::filesystem::path candidate = directory / (stem + extension);
-            if (std::filesystem::exists(candidate, exists_error)) {
-                return candidate;
-            }
-        }
-        return std::nullopt;
-    };
-
-    // -- open the parent archive if needed ---------------------------------
-    if (!chosen->parent.empty()) {
-        const MatchScore score = score_game(archives, *chosen);
-        if (!score.complete()) {
-            if (const auto parent_path = find_sibling_archive(chosen->parent)) {
-                SM2_INFO("'%s' is a clone; also reading %s", chosen->name.c_str(),
-                         parent_path->string().c_str());
-                if (!archives.open(parent_path->string())) {
-                    failure.game    = chosen->name;
-                    failure.message = parent_path->filename().string() + " could not be read.";
-                    return std::nullopt;
-                }
-            } else {
-                SM2_WARN("'%s' is a clone of '%s' and some chips are missing, but "
-                         "no %s.zip or %s.7z was found beside the archive",
-                         chosen->name.c_str(), chosen->parent.c_str(),
-                         chosen->parent.c_str(), chosen->parent.c_str());
-            }
-        }
-    }
-
-    // -- open any device ROM sets ------------------------------------------
-    // Device firmware (the I/O board's Z80 program) is bundled into most game
-    // archives but lives only in the device set in a MAME split set, so a
-    // device set is read only when the game is still short of files.
-    for (const std::string& device_set : chosen->device_sets) {
-        if (score_game(archives, *chosen).complete()) {
-            break;
-        }
-        if (const auto device_path = find_sibling_archive(device_set)) {
-            SM2_INFO("'%s' needs the '%s' device set; also reading %s",
-                     chosen->name.c_str(), device_set.c_str(),
-                     device_path->string().c_str());
-            if (!archives.open(device_path->string())) {
-                failure.game    = chosen->name;
-                failure.message = device_path->filename().string() + " could not be read.";
-                return std::nullopt;
-            }
-        } else {
-            SM2_WARN("'%s' is missing files that the '%s' device ROM set holds, but "
-                     "no %s.zip or %s.7z was found beside the archive",
-                     chosen->name.c_str(), device_set.c_str(), device_set.c_str(),
-                     device_set.c_str());
+        if (!open_support_archives(*chosen)) {
+            return std::nullopt;
         }
     }
 
@@ -896,6 +954,10 @@ std::optional<LoadResult> RomLoader::load(const GameDatabase& database,
         if (!chosen->parent.empty()) {
             failure.message += " This set is a clone, so " + chosen->parent
                              + ".zip or .7z must be in the same folder.";
+        }
+        for (const std::string& dev : missing_devices) {
+            failure.message += " Needs device ROM " + dev
+                             + ".zip (or .7z) in the same folder.";
         }
         return std::nullopt;
     }

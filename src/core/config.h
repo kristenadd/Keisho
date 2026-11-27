@@ -22,6 +22,7 @@
 #include <array>
 #include <map>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace sm2 {
@@ -124,6 +125,9 @@ struct Config {
     /// A gamepad's stick points at the screen, centred at rest, instead of
     /// moving the crosshair like a mouse.
     bool lightgun_pad_centred = false;
+
+    /// Analog-stick aiming sensitivity/speed for light-gun titles (25..300%).
+    u32  lightgun_stick_sensitivity = 100;
 
     /// Fire the gun's recoil motor on each shot, for guns exposed as a
     /// force-feedback device. Strength is 0..100 percent.
@@ -337,6 +341,37 @@ struct Config {
     /// that maps the hotkeys itself, such as Batocera.
     bool pad_shortcuts = true;
 
+    /// On-screen virtual touch gamepad visibility.
+    enum class VirtualGamepadMode : u32 { Auto, On, Off };
+#if defined(__ANDROID__)
+    VirtualGamepadMode virtual_gamepad = VirtualGamepadMode::Auto;
+#else
+    VirtualGamepadMode virtual_gamepad = VirtualGamepadMode::Off;
+#endif
+    u32 virtual_gamepad_opacity = 65;
+    u32 virtual_gamepad_scale   = 100;
+
+    enum class TouchGunAim : u32 { Direct, Stick };
+    TouchGunAim touch_gun_aim = TouchGunAim::Direct;
+
+    /// Bitmask flags for `PadLayout::touch_hidden`.
+    static constexpr u32 kTouchHideStick       = 1u << 0;
+    static constexpr u32 kTouchHideRightStick  = 1u << 1;
+    static constexpr u32 kTouchHideBtnA        = 1u << 2;
+    static constexpr u32 kTouchHideBtnB        = 1u << 3;
+    static constexpr u32 kTouchHideBtnX        = 1u << 4;
+    static constexpr u32 kTouchHideBtnY        = 1u << 5;
+    static constexpr u32 kTouchHideBtnLB       = 1u << 6;
+    static constexpr u32 kTouchHideBtnRB       = 1u << 7;
+    static constexpr u32 kTouchHideTriggerL    = 1u << 8;
+    static constexpr u32 kTouchHideTriggerR    = 1u << 9;
+    static constexpr u32 kTouchHideExtras      = 1u << 10;
+    static constexpr u32 kTouchHideCoin        = 1u << 11;
+    static constexpr u32 kTouchHideStart       = 1u << 12;
+    static constexpr u32 kTouchHideSaveBar     = 1u << 13;
+    static constexpr u32 kTouchHideServiceTest = 1u << 14;
+    static constexpr u32 kTouchHideFps         = 1u << 15;
+
     /// The keyboard shortcuts. Keep kCount last.
     enum class Hotkey : u32 {
         Exit, Quit, Overlay, Fullscreen, Screenshot, Pause, QuickSave, QuickLoad,
@@ -423,6 +458,9 @@ struct Config {
             { -1, -1, -1, -1, -1, -1 },
             { -1, -1, -1, -1, -1, -1 },
         }};
+
+        /// Bitmask of Config::kTouchHide* controls hidden on the virtual touch pad.
+        u32 touch_hidden = 0;
 
         bool operator==(const PadLayout&) const = default;
     };
@@ -544,6 +582,16 @@ struct Config {
     /// Model 3 ROM archives; empty means model2_rom_dir holds them too.
     std::string model3_rom_dir;
 
+    /// Per-system local cover artwork folders (image filename matches ROM stem).
+    std::string model1_artwork_dir;
+    std::string model2_artwork_dir;
+    std::string model3_artwork_dir;
+
+    /// Per-system bezel artwork folders (<game>.png, parent set's, or default.png).
+    std::string model1_bezel_dir;
+    std::string model2_bezel_dir;
+    std::string model3_bezel_dir;
+
     /// Saves: per-game .nv and .eeprom images. Empty here;
     /// resolve_default_paths() fills it under the platform data directory.
     std::string nvram_dir;
@@ -614,7 +662,30 @@ void resolve_default_paths(Config* config, bool config_in_cwd,
 /// if need be.
 [[nodiscard]] bool save_config(const std::string& path, const Config& config);
 
+/// Per-model include/exclude ROM filters loaded from `filters.ini`.
+struct ModelFilters {
+    std::unordered_set<std::string> model1_include;
+    std::unordered_set<std::string> model1_exclude;
+    std::unordered_set<std::string> model2_include;
+    std::unordered_set<std::string> model2_exclude;
+    std::unordered_set<std::string> model3_include;
+    std::unordered_set<std::string> model3_exclude;
+};
+
+[[nodiscard]] std::string filters_file_in(const std::string& directory);
+
+[[nodiscard]] bool parse_virtual_gamepad_mode(const std::string& value,
+                                              Config::VirtualGamepadMode* out);
+
+[[nodiscard]] bool load_or_create_filters(const std::string& path, ModelFilters* out);
+
 /// Parse a log level name. False on an unrecognised name, leaving the output alone.
 [[nodiscard]] bool parse_log_level(const std::string& name, log::Level* out_level);
+
+void set_android_directories(std::string config_dir, std::string data_dir,
+                             std::string assets_dir);
+[[nodiscard]] const std::string& android_config_directory();
+[[nodiscard]] const std::string& android_data_directory();
+[[nodiscard]] const std::string& android_assets_directory();
 
 }  // namespace sm2
