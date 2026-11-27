@@ -151,7 +151,7 @@ jobs:
       github.repository == 'kristenadd/Keisho' &&
       !contains(github.event.head_commit.message, '[skip release]') &&
       (github.event_name != 'workflow_dispatch' || inputs.mac)
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -303,7 +303,7 @@ jobs:
       github.repository == 'kristenadd/Keisho' &&
       !contains(github.event.head_commit.message, '[skip release]') &&
       (github.event_name != 'workflow_dispatch' || inputs.ios)
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 120
     strategy:
       fail-fast: false
