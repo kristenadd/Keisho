@@ -20,6 +20,7 @@
 #include "core/types.h"
 #include "osd/ui/kit.h"
 #include "osd/audio.h"
+#include "osd/vision.h"
 #include "render/backend.h"
 
 #include <array>
@@ -398,6 +399,10 @@ private:
     };
     TouchScroll m_touch_scroll;
     void        apply_safe_area();
+    /// Apple Vision Pro: either PlayStation VR2 Sense controller's stick and
+    /// buttons drive the menus like a gamepad's: the stick is the d-pad, Cross or
+    /// the trigger accepts, Circle or the grip goes back.
+    void        feed_spatial_nav();
     void        update_touch_scroll();
     float       m_ui_scale    = 0.0f;  ///< applied overlay scale; 0 forces first-frame apply.
     ImGuiStyle  m_base_style;          ///< the style at scale 1, in the theme's colours
@@ -601,6 +606,14 @@ private:
     int                        m_picker_system     = 0;      ///< 0 all, else Model 1, 2 or 3
     bool                       m_picker_focus_search = false; ///< a letter was typed: the field takes it
     bool                       m_picker_searching    = false; ///< the search field is being typed in
+    /// Nav keys the Sense controller drives (d-pad x4, Cross, Circle): what an
+    /// SDL gamepad last reported for each, and what ImGui was last given.
+    /// This frame's crosshairs, for the Vision Pro's stereo layer.
+    std::array<vision::Crosshair, 2> m_stereo_crosshairs{};
+    int                        m_stereo_crosshair_count = 0;
+    std::array<bool, 6>        m_spatial_sdl_keys{};
+    std::array<bool, 6>        m_spatial_sent_keys{};
+    std::array<bool, 4>        m_spatial_stick_dirs{};
     bool                       m_picker_head_focus   = false; ///< pad/keys are on "Hide alternates", not the tiles
     bool                       m_picker_drop_search  = false; ///< Escape: leave the field
     bool                       m_picker_can_return   = false;

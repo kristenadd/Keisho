@@ -26,6 +26,7 @@
 #include "osd/scraper.h"
 #include "osd/touch_gamepad.h"
 #include "osd/ui_text.h"
+#include "osd/vision.h"
 #include "render/geometry.h"
 
 #include "assets/pad_xbox_outline.h"
@@ -409,6 +410,7 @@ void Gui::new_frame()
         apply_language();
     }
     ImGui_ImplSDL3_NewFrame();
+    feed_spatial_nav();
     // DisplaySize stays the SDL logical size, which mouse input uses; correct
     // DisplayFramebufferScale to the backend's real pixel extent instead, since
     // SDL can under-report it on Wayland.
@@ -426,6 +428,74 @@ void Gui::new_frame()
         apply_safe_area();
         update_touch_scroll();
     }
+}
+
+void Gui::feed_spatial_nav()
+{
+#if defined(__APPLE__) && TARGET_OS_VISION
+    const auto guns = vision::spatial_guns(m_window);
+    // Either controller drives the menus: the larger stick push and any button.
+    vision::SpatialGun  both;
+    const vision::SpatialGun* pad = nullptr;
+    for (const vision::SpatialGun& g : guns) {
+        if (!g.present) {
+            continue;
+        }
+        pad = &both;
+        both.present    = true;
+        both.trigger   |= g.trigger;
+        both.grip      |= g.grip;
+        both.primary   |= g.primary;
+        both.secondary |= g.secondary;
+        if (std::abs(g.stick_x) > std::abs(both.stick_x)) both.stick_x = g.stick_x;
+        if (std::abs(g.stick_y) > std::abs(both.stick_y)) both.stick_y = g.stick_y;
+    }
+
+    // The stick as four directions, with some hysteresis so it does not chatter.
+    constexpr float kPress   = 0.55f;
+    constexpr float kRelease = 0.35f;
+    const float     axis[4]  = {pad ? pad->stick_y : 0.0f, pad ? -pad->stick_y : 0.0f,
+                                pad ? -pad->stick_x : 0.0f, pad ? pad->stick_x : 0.0f};
+    for (usize d = 0; d < 4; ++d) {
+        m_spatial_stick_dirs[d] = axis[d] > (m_spatial_stick_dirs[d] ? kRelease : kPress);
+    }
+    static constexpr ImGuiKey kKeys[6] = {ImGuiKey_GamepadDpadUp,   ImGuiKey_GamepadDpadDown,
+                                          ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight,
+                                          ImGuiKey_GamepadFaceDown, ImGuiKey_GamepadFaceRight};
+    const bool mine[6] = {m_spatial_stick_dirs[0], m_spatial_stick_dirs[1], m_spatial_stick_dirs[2],
+                          m_spatial_stick_dirs[3], pad != nullptr && (pad->primary || pad->trigger),
+                          pad != nullptr && (pad->secondary || pad->grip)};
+
+    ImGuiIO& io = ImGui::GetIO();
+    if (pad != nullptr) {
+        io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
+    }
+    // Merge with any SDL gamepad: the backend has just queued its changes for
+    // these keys, so fold ours into its event rather than queueing a second one
+    // that ImGui would trickle into a press and release.
+    ImGuiContext& ctx = *ImGui::GetCurrentContext();
+    for (usize k = 0; k < 6; ++k) {
+        ImGuiInputEvent* queued = nullptr;
+        for (int e = ctx.InputEventsQueue.Size - 1; e >= 0; --e) {
+            ImGuiInputEvent& ev = ctx.InputEventsQueue[e];
+            if (ev.Type == ImGuiInputEventType_Key && ev.Key.Key == kKeys[k]) {
+                queued = &ev;
+                break;
+            }
+        }
+        if (queued != nullptr) {
+            m_spatial_sdl_keys[k] = queued->Key.Down;
+        }
+        const bool down = m_spatial_sdl_keys[k] || mine[k];
+        if (queued != nullptr) {
+            queued->Key.Down        = down;
+            queued->Key.AnalogValue = down ? 1.0f : 0.0f;
+        } else if (down != m_spatial_sent_keys[k]) {
+            io.AddKeyEvent(kKeys[k], down);
+        }
+        m_spatial_sent_keys[k] = down;
+    }
+#endif
 }
 
 void Gui::apply_safe_area()
@@ -631,6 +701,7 @@ bool Gui::draw(Config& config, const std::vector<std::string>& gpu_names,
         draw_bezel(config);
     }
 
+    m_stereo_crosshair_count = 0;
     if ((gun_game || config.lightgun == Mode::On) && !m_picker_enabled && !m_visible) {
         draw_sinden_border(config);
         if (config.lightgun_crosshair) {
@@ -638,6 +709,8 @@ bool Gui::draw(Config& config, const std::vector<std::string>& gpu_names,
         }
         draw_calibration_markers(input);
     }
+    // Vision Pro: the same crosshairs over the 3D picture, which hides this overlay.
+    vision::set_stereo_crosshairs(m_window, m_stereo_crosshairs.data(), m_stereo_crosshair_count);
 
     // Full-screen picker when active and Settings is closed; F10 opens Settings
     // on top.
@@ -4757,6 +4830,13 @@ void Gui::draw_crosshairs(const Config& config, const Input* input)
         }
         const float cx = box.x + fx * box.width;
         const float cy = box.y + fy * box.height;
+        if (m_stereo_crosshair_count < static_cast<int>(m_stereo_crosshairs.size())) {
+            static constexpr float kRgb[2][3] = {{0.0f, 1.0f, 0.0f}, {0.0f, 0.78f, 1.0f}};
+            const float*           rgb        = kRgb[player < 2 ? player : 0];
+            m_stereo_crosshairs[static_cast<usize>(m_stereo_crosshair_count++)] =
+                vision::Crosshair{cx / io.DisplaySize.x, cy / io.DisplaySize.y, radius / io.DisplaySize.y,
+                                  rgb[0], rgb[1], rgb[2]};
+        }
         if (player < m_crosshair_images.size() && m_crosshair_images[player].handle != 0) {
             const CrosshairImage& image = m_crosshair_images[player];
             const float           scale = box.height / 1080.0f;

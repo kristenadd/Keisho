@@ -503,7 +503,8 @@ if(SM2_PLATFORM_VISIONOS)
     set_source_files_properties(osd/vision_window.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     set_source_files_properties("${CMAKE_SOURCE_DIR}/data/visionos/StereoMaterial.usda"
                                 PROPERTIES MACOSX_PACKAGE_LOCATION "")
-    target_link_libraries(keisho PRIVATE "-framework RealityKit" "-framework SwiftUI" "-framework Metal")
+    target_link_libraries(keisho PRIVATE "-framework RealityKit" "-framework SwiftUI" "-framework Metal"
+                                         "-framework GameController" "-framework ARKit")
     if(SM2_IOS_SIMULATOR)
         set(sm2_swift_platform "xrsimulator")
     else()

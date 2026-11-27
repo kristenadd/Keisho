@@ -70,7 +70,14 @@
             <key>ProfileName</key>
             <string>ExtendedGamepad</string>
         </dict>
+        <!-- PlayStation VR2 Sense controllers, tracked as light guns. -->
+        <dict>
+            <key>ProfileName</key>
+            <string>SpatialGamepad</string>
+        </dict>
     </array>
+    <key>NSAccessoryTrackingUsageDescription</key>
+    <string>Keisho tracks your PlayStation VR2 Sense controllers so you can aim them as light guns.</string>
     <!-- A look and pinch reaches the overlay as a pointer. -->
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>

@@ -626,6 +626,18 @@ private:
     /// Written by gather_lightguns, read by the GUI. Mutable for the same reason.
     mutable std::array<GunAim, kPlayers> m_gun_aims{};
 
+    /// A Sense controller's buttons, held from the menus into the game, stay
+    /// out of it until released (see hold_pads_until_released).
+    mutable bool                        m_spatial_hold_pending = false;
+    mutable std::array<bool, kPlayers>  m_spatial_held_off{};
+    /// When each player's Sense controller last pointed at the window: it
+    /// drives the gun only while in use, so one left lying about does not take
+    /// the aim from a gamepad or the pointer.
+    mutable std::array<u64, kPlayers>   m_spatial_aimed_ms{};
+    /// A button has been pressed on this player's Sense controller since it
+    /// connected; until then player 2's crosshair stays hidden.
+    mutable std::array<bool, kPlayers>  m_spatial_engaged{};
+
     /// Each player's last raw aim and when it last moved or fired, for GunAim::idle.
     /// A gun counts as idle until it is first used.
     mutable std::array<bool, kPlayers>  m_gun_sampled{};

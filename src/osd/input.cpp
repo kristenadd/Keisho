@@ -20,6 +20,7 @@
 #include "core/log.h"
 #include "hw/model2.h"
 #include "osd/drive_command.h"
+#include "osd/vision.h"
 #include "osd/wheel_ffb.h"
 
 #ifdef SM2_HAVE_LIGHTGUNS
@@ -1342,6 +1343,7 @@ void Input::hold_pads_until_released()
             pad.held_off = true;
         }
     }
+    m_spatial_hold_pending = true;  // checked against the Sense controllers on the next poll
 }
 
 Input::PadShortcuts Input::update_pad_shortcuts(bool enabled)
@@ -2207,11 +2209,102 @@ void Input::gather_lightguns(hw::Inputs* inputs, const rom::GameSpec& game) cons
     }
 #endif
 
+    // Apple Vision Pro: a PlayStation VR2 Sense controller is a light gun for
+    // a player without a dedicated one. Its aim ray meets the window; trigger
+    // fires, grip reloads (or fires the missile). The right controller is
+    // player 1 with Cross as Start and Circle a coin; the left is player 2 with
+    // Square as Start and Triangle a coin.
+    std::array<bool, kPlayers> on_spatial{};
+    {
+        SDL_Window* window = SDL_GetKeyboardFocus();
+        if (window == nullptr) {
+            window = SDL_GetMouseFocus();
+        }
+        const std::array<vision::SpatialGun, 2> spatial = vision::spatial_guns(window);
+        int pix_w = 0;
+        int pix_h = 0;
+        render::Letterbox box{};
+        if (window != nullptr && SDL_GetWindowSizeInPixels(window, &pix_w, &pix_h) && pix_w > 0 && pix_h > 0) {
+            box = render::compute_game_rect(static_cast<u32>(pix_w), static_cast<u32>(pix_h),
+                                            m_present_aspect, m_present_method, m_present_area);
+        }
+        // Buttons held from the menus stay out of the game until let go.
+        for (usize p = 0; p < kPlayers && p < spatial.size(); ++p) {
+            if (!spatial[p].present) {
+                m_spatial_engaged[p] = false;
+            }
+            if (m_spatial_hold_pending && spatial[p].any_button()) {
+                m_spatial_held_off[p] = true;
+            }
+            if (!spatial[p].any_button()) {
+                m_spatial_held_off[p] = false;
+            }
+        }
+        m_spatial_hold_pending = false;
+        for (usize p = 0; p < kPlayers && p < spatial.size(); ++p) {
+            if (spatial[p].any_button() && !m_spatial_held_off[p]) {
+                m_spatial_engaged[p] = true;
+            }
+        }
+        for (usize p = 0; p < kPlayers && p < spatial.size(); ++p) {
+            const vision::SpatialGun& sg = spatial[p];
+            if (!sg.present || on_gun[p] || box.width <= 0.0f || box.height <= 0.0f) {
+                continue;
+            }
+            // Pointing away briefly (to reload off screen) keeps it the gun;
+            // longer, and the other inputs aim again.
+            constexpr u64 kAwayMs = 1500;
+            const u64     now_ms  = SDL_GetTicks();
+            if (sg.aimed) {
+                m_spatial_aimed_ms[p] = now_ms;
+            }
+            if (m_spatial_aimed_ms[p] == 0 || now_ms - m_spatial_aimed_ms[p] > kAwayMs) {
+                continue;
+            }
+            const bool live = !m_spatial_held_off[p];
+            GunInput gi;
+            gi.win_x = sg.x;
+            gi.win_y = sg.y;
+            if (sg.aimed) {
+                gi.x = (sg.x * static_cast<float>(pix_w) - box.x) / box.width;
+                gi.y = (sg.y * static_cast<float>(pix_h) - box.y) / box.height;
+            } else {
+                gi.x = -1.0f;  // pointing away: off screen, so firing reloads
+                gi.y = -1.0f;
+            }
+            if (has_missile) {
+                gi.trigger = live && sg.trigger;
+                gi.missile = live && sg.grip;
+            } else {
+                gi.trigger = live && (sg.trigger || sg.grip);
+                gi.reload  = live && sg.grip;
+            }
+            (p == 0 ? p1 : p2) = gi;
+            on_spatial[p]         = true;
+            on_mouse[p]           = false;
+            m_gun_cursor_owns[p]  = false;
+        }
+        // Coin and Start work wherever the controller points, so a player can
+        // join before aiming.
+        for (usize p = 0; p < kPlayers && p < spatial.size(); ++p) {
+            const vision::SpatialGun& sg = spatial[p];
+            if (!sg.present || on_gun[p] || m_spatial_held_off[p]) {
+                continue;
+            }
+            GunInput& gi = p == 0 ? p1 : p2;
+            gi.start     = gi.start || sg.primary;
+            gi.coin      = gi.coin || sg.secondary;
+        }
+    }
+
     // Keyboard/pad aiming fallback: a per-player cursor nudged by the sticks or
     // arrows, fired with the Accelerator slot / Left Ctrl, reload-or-missile on
     // Brake / Right Alt. It overrides the mouse only while driven.
     {
         const auto aim_from = [&](usize player, GunInput& gi) {
+            if (on_spatial[player]) {
+                return;  // the controller's own aim and buttons
+            }
             const bool has_touch = (player == 0 && on_touch_aim);
             if (has_touch && m_virtual.touch_aim_engaged) {
                 m_gun_cursor_owns[player] = false;
@@ -2321,7 +2414,9 @@ void Input::gather_lightguns(hw::Inputs* inputs, const rom::GameSpec& game) cons
 
     // Record the aim (before the reload snap) for the crosshair overlay. Player 2's
     // shows only when a second gun or pad aims it.
-    const bool p2_active = on_gun[1] || pad_for(1) != nullptr;
+    // A Sense controller shows player 2's only once a button on it is pressed.
+    const bool p2_active = on_gun[1] || (on_spatial[1] && m_spatial_engaged[1])
+                        || (!on_spatial[1] && pad_for(1) != nullptr);
     // `side` is how far the widescreen picture reaches past the screen, as a
     // fraction of its width.
     const float side = static_cast<float>(m_wide_columns) / static_cast<float>(render::kNativeWidth);

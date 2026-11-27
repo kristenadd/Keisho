@@ -3078,6 +3078,10 @@ int main(int argc, char** argv)
             if (pad_shortcuts.guide_tap && !(gui.visible() && gui.capturing_input())) {
                 gui.toggle();
             }
+            // Vision Pro: so does pressing in the right Sense controller's stick.
+            if (osd::vision::spatial_menu_pressed(window.handle()) && !(gui.visible() && gui.capturing_input())) {
+                gui.toggle();
+            }
 
             // Opening the overlay pauses the game; the manual pause holds
             // independently. Audio and the pacer follow on each transition.
