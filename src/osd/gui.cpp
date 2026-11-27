@@ -6517,10 +6517,19 @@ void Gui::draw_picker(Config& config)
             const float  right = m_touch_ui ? cog_at.x : search_at.x;
             const ImVec2 at(right - kit.px(8.0f) - size.x, head_top + std::floor((head_h - size.y) * 0.5f));
             alt_left = at.x;
+            // Out of ImGui's own navigation: the picker moves the focus here
+            // itself (Up from the top row), so A never reaches a tile too.
+            ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
             if (kit.button_at(label, at, on ? ui::Kit::Tone::Primary : ui::Kit::Tone::Plain,
                               on ? ui::Kit::Icon::Check : ui::Kit::Icon::None)) {
                 config.hide_alternate_versions = !on;
                 m_picker_scroll_to_sel         = true;
+            }
+            ImGui::PopItemFlag();
+            if (m_picker_head_focus) {
+                const float o = kit.px(3.0f);
+                list->AddRect(ImVec2(at.x - o, at.y - o), ImVec2(at.x + size.x + o, at.y + size.y + o), p.accent,
+                              kit.px(9.0f), 0, kit.stroke() * 2.0f);
             }
             if (ImGui::IsItemHovered()) {
                 tooltip((io.BackendFlags & ImGuiBackendFlags_HasGamepad)
@@ -6748,7 +6757,20 @@ void Gui::draw_picker(Config& config)
     const auto pressed = [&](ImGuiKey k) {
         return !m_load_error.has_value() && !io.WantTextInput && ImGui::IsKeyPressed(k, true);
     };
-    if (sel >= 0) {
+    // A click goes where it lands: off the head's button.
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) m_picker_head_focus = false;
+    if (m_picker_head_focus) {
+        // On "Hide alternates": A or Enter flips it; Down (or B) goes back
+        // to the tiles. The tiles take no keys meanwhile.
+        if (pressed(ImGuiKey_Enter) || pressed(ImGuiKey_KeypadEnter) || pressed(ImGuiKey_GamepadFaceDown)) {
+            config.hide_alternate_versions = !config.hide_alternate_versions;
+            m_picker_scroll_to_sel         = true;
+        }
+        if (pressed(ImGuiKey_DownArrow) || pressed(ImGuiKey_GamepadDpadDown) || pressed(ImGuiKey_GamepadFaceRight)) {
+            m_picker_head_focus    = false;
+            m_picker_scroll_to_sel = true;
+        }
+    } else if (sel >= 0) {
         int next = sel;
         if (pressed(ImGuiKey_RightArrow) || pressed(ImGuiKey_GamepadDpadRight)) next = std::min(sel + 1, static_cast<int>(shown.size()) - 1);
         if (pressed(ImGuiKey_LeftArrow) || pressed(ImGuiKey_GamepadDpadLeft)) next = std::max(sel - 1, 0);
@@ -6764,6 +6786,7 @@ void Gui::draw_picker(Config& config)
                 if (spots[i].row == to && (best < 0 || spots[i].column <= spots[static_cast<usize>(sel)].column)) best = static_cast<int>(i);
             }
             if (best >= 0) next = best;
+            if (best < 0 && step < 0) m_picker_head_focus = true;  // Up from the top row: the head
         }
         if (next != sel) {
             sel                    = next;

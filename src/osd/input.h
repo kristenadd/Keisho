@@ -215,6 +215,12 @@ public:
     /// read or hidden, for a host that maps the hotkeys itself.
     [[nodiscard]] PadShortcuts update_pad_shortcuts(bool enabled);
 
+    /// A menu (settings, the game list) is handing the game the pads: hide
+    /// each pad with a button down from the game until all its buttons are
+    /// up, so what was pressed in the menu does not reach the machine.
+    /// update_pad_shortcuts() lets them back.
+    void hold_pads_until_released();
+
     /// Number of axes on the connected wheel, or 0 if none.
     [[nodiscard]] int wheel_axis_count() const;
 
@@ -450,12 +456,16 @@ private:
         bool           guide_down = false;
         bool           guide_solo = false;
         bool           is_virtual       = false;
+        /// Held off the game until every button is up: set when a menu hands
+        /// the game back, so the press that closed it is not also played.
+        bool           held_off         = false;
     };
 
-    /// Whether the game sees this pad: not while it is in a shortcut.
+    /// Whether the game sees this pad: not while it is in a shortcut, or
+    /// still holding a button pressed in a menu.
     [[nodiscard]] static bool plays(const Pad& pad)
     {
-        return (pad.handle != nullptr || pad.is_virtual) && pad.shortcut_claimed == 0;
+        return (pad.handle != nullptr || pad.is_virtual) && pad.shortcut_claimed == 0 && !pad.held_off;
     }
 
     /// A steering wheel, opened through the joystick API because a wheel has no

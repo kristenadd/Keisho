@@ -601,6 +601,7 @@ private:
     int                        m_picker_system     = 0;      ///< 0 all, else Model 1, 2 or 3
     bool                       m_picker_focus_search = false; ///< a letter was typed: the field takes it
     bool                       m_picker_searching    = false; ///< the search field is being typed in
+    bool                       m_picker_head_focus   = false; ///< pad/keys are on "Hide alternates", not the tiles
     bool                       m_picker_drop_search  = false; ///< Escape: leave the field
     bool                       m_picker_can_return   = false;
     bool                       m_pending_return_to_picker = false;

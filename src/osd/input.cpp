@@ -1320,6 +1320,30 @@ bool Input::menu_button_pressed()
     return edge;
 }
 
+namespace {
+
+/// Any of `pad`'s buttons down (sticks and triggers aside: they rest anywhere).
+[[nodiscard]] bool any_pad_button_down(SDL_Gamepad* pad)
+{
+    for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; ++b) {
+        if (SDL_GetGamepadButton(pad, static_cast<SDL_GamepadButton>(b))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+void Input::hold_pads_until_released()
+{
+    for (Pad& pad : m_pads) {
+        if (pad.handle != nullptr && any_pad_button_down(pad.handle)) {
+            pad.held_off = true;
+        }
+    }
+}
+
 Input::PadShortcuts Input::update_pad_shortcuts(bool enabled)
 {
     enum : u8 { kA = 1, kX = 2, kY = 4, kStart = 8, kLB = 16, kDpadLeft = 32, kDpadRight = 64 };
@@ -1328,6 +1352,9 @@ Input::PadShortcuts Input::update_pad_shortcuts(bool enabled)
     for (Pad& pad : m_pads) {
         if (pad.handle == nullptr) {
             continue;
+        }
+        if (pad.held_off && !any_pad_button_down(pad.handle)) {
+            pad.held_off = false;
         }
         if (!enabled) {
             pad.shortcut_down    = 0;

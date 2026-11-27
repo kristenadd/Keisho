@@ -2690,6 +2690,7 @@ int main(int argc, char** argv)
         };
         std::optional<StateAction> state_action;
         bool settings_was_visible = gui.visible();  ///< Settings visibility, last frame.
+        bool game_had_pads        = false;          ///< The game read the pads last frame (no menu up).
         const RendererKey renderer_at_open = current_renderer_key();
         // What the game list is built from, as it was when the settings opened:
         // the list is rebuilt only when one of these changed there.
@@ -3174,6 +3175,15 @@ int main(int argc, char** argv)
             backend->set_model3_async(m3_async);
             // --run-frames' extra pass to show the last frame emulated.
             const bool draining = options.run_frames != 0 && frames_presented >= options.run_frames;
+
+            // A menu handing the pads back to the game (Resume, a game picked
+            // from the list): a button still down from the menu is not played.
+            const bool game_has_pads =
+                machine_any != nullptr && !gui.visible() && !gui.picker_active() && !gui.load_error_open();
+            if (game_has_pads && !game_had_pads) {
+                input.hold_pads_until_released();
+            }
+            game_had_pads = game_has_pads;
 
             bool rewinding = false;
             if (machine_any && !effective_pause && !draining) {
