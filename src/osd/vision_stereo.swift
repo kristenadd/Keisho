@@ -267,7 +267,7 @@ final class SpatialAim {
                 MainActor.assumeIsolated { self?.refresh() }
             }
         }
-        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil,
+        NotificationCenter.default.addObserver(forName: UIScene.didActivateNotification, object: nil,
                                                queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.runTracking(attempt: 0) }
         }
