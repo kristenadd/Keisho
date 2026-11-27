@@ -723,9 +723,9 @@ jobs:
       - name: Smoke test
         run: |
           $exe = "keisho-${{ env.VERSION }}-windows-x86_64\keisho.exe"
-          & $exe --help
+          & $exe --help | Out-Host  # a GUI-subsystem exe: the pipe makes PowerShell wait for it
           if ($LASTEXITCODE -ne 0) { throw "keisho --help exited $LASTEXITCODE" }
-          & $exe --list-games
+          & $exe --list-games | Out-Host  # a GUI-subsystem exe: the pipe makes PowerShell wait for it
           if ($LASTEXITCODE -ne 0) { throw "keisho --list-games exited $LASTEXITCODE" }
 
       - name: Build zip
