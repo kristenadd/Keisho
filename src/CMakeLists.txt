@@ -614,26 +614,18 @@ elseif(SM2_PLATFORM_IOS)
     set_target_properties(keisho PROPERTIES
         XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
         XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)")
-    # Home-screen icons, scaled at configure time from a full-bleed square
-    # (the round artwork over its own navy, so iOS's mask shows no black
-    # corners). Vision Pro instead has a layered icon in an asset catalog, below.
+    # The iPhone / iPad icon: an asset catalog made at configure time around a
+    # full-bleed 1024 square (the round artwork over its own navy, so iOS's
+    # mask shows no black corners). actool makes every size from it; App Store
+    # Connect needs the compiled AppIcon and CFBundleIconName. Vision Pro
+    # instead has a layered icon in its own asset catalog, below.
     set(sm2_icon_src "${CMAKE_SOURCE_DIR}/data/icons/keisho-ios.png")
-    set(sm2_icon_dir "${CMAKE_BINARY_DIR}/ios-icons")
-    file(MAKE_DIRECTORY "${sm2_icon_dir}")
-    set(SM2_IOS_ICONS)
-    foreach(spec "AppIcon60x60@2x.png:120" "AppIcon60x60@3x.png:180"
-                 "AppIcon76x76@2x.png:152" "AppIcon83.5x83.5@2x.png:167")
-        string(REPLACE ":" ";" spec "${spec}")
-        list(GET spec 0 sm2_icon_name)
-        list(GET spec 1 sm2_icon_px)
-        set(sm2_icon_out "${sm2_icon_dir}/${sm2_icon_name}")
-        if(NOT EXISTS "${sm2_icon_out}" OR "${sm2_icon_src}" IS_NEWER_THAN "${sm2_icon_out}")
-            execute_process(COMMAND sips -z ${sm2_icon_px} ${sm2_icon_px}
-                                    "${sm2_icon_src}" --out "${sm2_icon_out}"
-                            OUTPUT_QUIET ERROR_QUIET)
-        endif()
-        list(APPEND SM2_IOS_ICONS "${sm2_icon_out}")
-    endforeach()
+    set(SM2_IOS_ASSETS "${CMAKE_BINARY_DIR}/ios-assets/Assets.xcassets")
+    file(WRITE "${SM2_IOS_ASSETS}/Contents.json" "{ \"info\" : { \"author\" : \"xcode\", \"version\" : 1 } }\n")
+    file(WRITE "${SM2_IOS_ASSETS}/AppIcon.appiconset/Contents.json"
+        "{\n  \"images\" : [ { \"filename\" : \"AppIcon.png\", \"idiom\" : \"universal\", \"platform\" : \"ios\", \"size\" : \"1024x1024\" } ],\n"
+        "  \"info\" : { \"author\" : \"xcode\", \"version\" : 1 }\n}\n")
+    configure_file("${sm2_icon_src}" "${SM2_IOS_ASSETS}/AppIcon.appiconset/AppIcon.png" COPYONLY)
 elseif(SM2_PLATFORM_WINDOWS)
     # No console window on launch; keep int main().
     if(MSVC)
@@ -703,8 +695,9 @@ if(NOT SM2_PLATFORM_MACOS AND NOT SM2_PLATFORM_ANDROID)
 endif()
 if(SM2_PLATFORM_IOS)
     # Asset catalogs: the launch screen's gradient and logo on every device,
-    # and on Vision Pro its layered icon too, a navy back and the artwork in
-    # front, which the system moves apart in depth. The launch storyboard lays
+    # and each platform's icon: on iPhone / iPad the one made above, on Vision
+    # Pro a layered icon, a navy back and the artwork in front, which the
+    # system moves apart in depth. The launch storyboard lays
     # out the launch picture (osd/launch_splash.mm repeats it in the app).
     # Xcode compiles both itself; for Ninja, actool and ibtool do, before the
     # bundle is signed.
@@ -718,19 +711,13 @@ if(SM2_PLATFORM_IOS)
     else()
         set(sm2_actool_platform $<IF:$<BOOL:${SM2_IOS_SIMULATOR}>,iphonesimulator,iphoneos>)
         set(sm2_devices --target-device iphone --target-device ipad)
-        set(sm2_app_icon)
-        foreach(icon IN LISTS SM2_IOS_ICONS)
-            add_custom_command(TARGET keisho POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${icon}" "$<TARGET_FILE_DIR:keisho>/"
-                VERBATIM)
-        endforeach()
+        list(APPEND sm2_assets "${SM2_IOS_ASSETS}")
+        set(sm2_app_icon --app-icon AppIcon)
     endif()
     if(CMAKE_GENERATOR STREQUAL "Xcode")
         target_sources(keisho PRIVATE ${sm2_assets} "${sm2_storyboard}")
         set_source_files_properties(${sm2_assets} "${sm2_storyboard}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-        if(SM2_PLATFORM_VISIONOS)
-            set_target_properties(keisho PROPERTIES XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon")
-        endif()
+        set_target_properties(keisho PROPERTIES XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon")
     else()
         add_custom_command(TARGET keisho POST_BUILD
             COMMAND xcrun actool ${sm2_assets} --compile "$<TARGET_BUNDLE_DIR:keisho>"

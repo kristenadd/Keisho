@@ -40,28 +40,10 @@
         <string>arm64</string>
         <string>metal</string>
     </array>
-    <key>CFBundleIcons</key>
-    <dict>
-        <key>CFBundlePrimaryIcon</key>
-        <dict>
-            <key>CFBundleIconFiles</key>
-            <array>
-                <string>AppIcon60x60</string>
-            </array>
-        </dict>
-    </dict>
-    <key>CFBundleIcons~ipad</key>
-    <dict>
-        <key>CFBundlePrimaryIcon</key>
-        <dict>
-            <key>CFBundleIconFiles</key>
-            <array>
-                <string>AppIcon60x60</string>
-                <string>AppIcon76x76</string>
-                <string>AppIcon83.5x83.5</string>
-            </array>
-        </dict>
-    </dict>
+    <!-- The icon in Assets.car (made in src/CMakeLists.txt from
+         data/icons/keisho-ios.png); Xcode adds CFBundleIcons from it. -->
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <!-- The launch screen: the Vision Pro icon's gradient and logo
          (data/launch/LaunchScreen.storyboard). A launch storyboard also gives
          the app the whole display at its native size. -->
