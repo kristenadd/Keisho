@@ -13,8 +13,25 @@
 # version (v0.9.63.1, v0.9.63.2, …; a new upstream version starts again at .1). Once every build has
 # succeeded, the release job creates the tag on the commit and a GitHub release with all the files,
 # and also puts the signed Mac and iOS builds on build.yml's rolling "dev" pre-release. A failed
-# or cancelled run tags nothing. The revision is also the Mac and iOS apps' build number
-# (CFBundleVersion). A run by hand builds the next version's files without releasing them.
+# or cancelled run tags nothing. The Mac, iOS and visionOS apps' version (CFBundleShortVersionString)
+# is <version>, and their build number (CFBundleVersion) is <revision>.<run number>, so every
+# upload to App Store Connect is a newer build. A run by hand builds the next version's files
+# without releasing them.
+#
+# App Store Connect (TestFlight / App Store): the iOS and visionOS jobs also export an App Store
+# .ipa from the same archive (Apple Distribution and an App Store profile Xcode makes), and the
+# "App Store Connect" job uploads it with the same API key (fastlane `testflight` /
+# `app_store_review`). No other certificate or secret is needed. Both platforms are one App Store
+# Connect app with the bundle id IOS_BUNDLE_ID and an iOS and a visionOS platform. That app record
+# has to be made once by hand (App Store Connect ▸ Apps ▸ +, then Add Platform ▸ visionOS), since
+# the API can't make it.
+#   Pushes (main, tags) upload to TestFlight unless APP_STORE_ON_PUSH is "none". If the app record
+#   (or its visionOS platform) is missing, they only warn. A run by hand chooses with "App Store
+#   Connect": none, testflight, or review. Review uploads, then submits <version> for App Review
+#   with the metadata already in App Store Connect; it isn't released automatically.
+#   variables: APP_STORE_ON_PUSH            optional: "none" turns the push uploads off
+#              TESTFLIGHT_GROUPS            optional: TestFlight groups (comma-separated) that
+#                                           pushes give the build to; empty = internal testers only
 #
 # Secrets (Settings ▸ Secrets and variables ▸ Actions). The names are the same as in
 # outrun2-decomp, PairMagic and SimulatorManager; ~/Projects/SigningSecrets exports them from the
@@ -90,6 +107,15 @@ on:
         description: Firebase tester groups (comma-separated; empty = the FIREBASE_GROUPS variable)
         type: string
         default: ''
+      app_store:
+        description: App Store Connect (iOS and visionOS)
+        type: choice
+        options: [none, testflight, review]
+        default: none
+      testflight_groups:
+        description: TestFlight groups to give the build to (comma-separated; empty = internal testers only)
+        type: string
+        default: ''
 
 # On main a newer push waits for the running release instead of cancelling it, so two runs can't
 # claim the same revision.
@@ -118,11 +144,16 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       tag: ${{ steps.v.outputs.tag }}
       build: ${{ steps.v.outputs.build }}
+      marketing: ${{ steps.v.outputs.marketing }}
+      app_store: ${{ steps.v.outputs.app_store }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Work out the version
         id: v
+        env:
+          APP_STORE_INPUT: ${{ inputs.app_store }}
+          APP_STORE_ON_PUSH: ${{ vars.APP_STORE_ON_PUSH }}
         run: |
           base=$(sed -n 's/^ *VERSION *\([0-9][0-9.]*\).*/\1/p' CMakeLists.txt | head -1)
           [ -n "$base" ] || { echo "::error::No project VERSION in CMakeLists.txt"; exit 1; }
@@ -138,11 +169,17 @@ jobs:
             tag="v$version"
           fi
           case "$version" in
-            "$base".*) build=${version##*.} ;;
+            "$base".*) build=${version##*.}.$GITHUB_RUN_NUMBER ;;
             *)         build=$GITHUB_RUN_NUMBER ;;
           esac
-          echo "Version $version (tag $tag, build $build)"
-          { echo "version=$version"; echo "tag=$tag"; echo "build=$build"; } >> "$GITHUB_OUTPUT"
+          # App Store Connect: what a run by hand asked for. Pushes upload to TestFlight unless
+          # APP_STORE_ON_PUSH is "none" ("soft": a missing app record only warns).
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then app_store=${APP_STORE_INPUT:-none}
+          elif [ "$APP_STORE_ON_PUSH" = none ]; then app_store=none
+          else app_store=testflight-soft; fi
+          echo "Version $version (tag $tag, build $build, App Store Connect: $app_store)"
+          { echo "version=$version"; echo "tag=$tag"; echo "build=$build"; echo "marketing=$base"
+            echo "app_store=$app_store"; } >> "$GITHUB_OUTPUT"
 
   mac:
     name: Mac app (notarized)
@@ -466,6 +503,39 @@ jobs:
           name: ${{ matrix.platform }}-ipa
           path: dist/${{ env.IPA }}
 
+      # The same archive signed for App Store Connect (Apple Distribution, an App Store profile
+      # Xcode makes). The "App Store Connect" job uploads it. Not part of the GitHub release.
+      - name: Export the App Store .ipa
+        if: needs.version.outputs.app_store != 'none'
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptionsAppStore.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Keisho.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptionsAppStore.plist" -exportPath "$RUNNER_TEMP/export-appstore" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "${{ secrets.NOTARY_API_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.NOTARY_API_ISSUER_ID }}"
+          mkdir -p appstore
+          cp "$RUNNER_TEMP"/export-appstore/*.ipa "appstore/keisho-${{ matrix.platform }}-appstore.ipa"
+
+      - uses: actions/upload-artifact@v4
+        if: needs.version.outputs.app_store != 'none'
+        with:
+          name: appstore-${{ matrix.platform }}
+          path: appstore/keisho-${{ matrix.platform }}-appstore.ipa
+          retention-days: 7
+
       - name: Upload to Firebase App Distribution
         if: matrix.platform == 'ios' && vars.FIREBASE_IOS_APP_ID != '' && (github.event_name != 'workflow_dispatch' || inputs.firebase)
         env:
@@ -481,6 +551,59 @@ jobs:
         run: |
           [ -n "${KEYCHAIN:-}" ] && security delete-keychain "$KEYCHAIN" || true
           rm -fP "$RUNNER_TEMP/AuthKey.p8"
+
+  # The App Store .ipa files -> App Store Connect: TestFlight, or App Review (see the top). It runs
+  # beside the GitHub release, which doesn't wait for it.
+  app-store:
+    name: App Store Connect (${{ matrix.platform }})
+    needs: [version, ios]
+    if: needs.version.outputs.app_store != 'none'
+    runs-on: xcode-27
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ios
+            fastlane_platform: ios
+          - platform: visionos
+            fastlane_platform: xros
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: appstore-${{ matrix.platform }}
+          path: appstore
+
+      - name: Upload
+        env:
+          MODE: ${{ needs.version.outputs.app_store }}
+          VERSION: ${{ needs.version.outputs.version }}
+          MARKETING: ${{ needs.version.outputs.marketing }}
+          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+          TESTER_GROUPS: ${{ github.event_name == 'workflow_dispatch' && inputs.testflight_groups || vars.TESTFLIGHT_GROUPS }}
+          NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+        run: |
+          ipa="$PWD/appstore/keisho-${{ matrix.platform }}-appstore.ipa"
+          case $MODE in
+            testflight|testflight-soft)
+              soft=false; [ "$MODE" = testflight-soft ] && soft=true
+              bundle exec fastlane ios testflight ipa:"$ipa" platform:${{ matrix.fastlane_platform }} \
+                bundle_id:"$BUNDLE_ID" groups:"$TESTER_GROUPS" soft:$soft \
+                notes:"Keisho $VERSION: $(git log -1 --format='%h %s')" ;;
+            review)
+              bundle exec fastlane ios app_store_review ipa:"$ipa" platform:${{ matrix.fastlane_platform }} \
+                bundle_id:"$BUNDLE_ID" version:"$MARKETING" ;;
+            *) echo "::error::Unknown App Store Connect mode $MODE"; exit 1 ;;
+          esac
 
   # Linux and Windows: the same builds as build.yml (not code-signed), so one run of this workflow
   # makes every platform's download.
@@ -754,9 +877,11 @@ jobs:
       TAG: ${{ needs.version.outputs.tag }}
       VERSION: ${{ needs.version.outputs.version }}
     steps:
+      # Every build's files except the App Store .ipa files (appstore-*).
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: '{mac-dmg,*-ipa,keisho-*}'
           merge-multiple: true
 
       # gh makes the tag on this commit. (A tag pushed with the workflow's token starts no other
